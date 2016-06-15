@@ -4,18 +4,27 @@ Data Reading Functions
 @author: Kenny Swartz
 06/07/2016
 """
+import os
 import numpy as np
 import csv
+
+
+
+def read_data_from_text(path):
+    file    = open(path, 'r') 
+    data    = np.loadtxt(file, dtype=float)
+    file.close()
+    return data
+
+
 
 def vic2d_reader(path):
     """ function reads in a vic2d output .csv file
     
     inputs:
-    
     path              : path to .csv file
     
     outputs:
-    
     data              : numpy array of data (number of data points x columns of output data) """
     
     fid        = open(path, 'r')                         
@@ -27,19 +36,19 @@ def vic2d_reader(path):
     
     data       = np.array(data[1:], dtype=float)          # skip header
     
-    return data     
+    return data    
+
+
 
 def ge2_reader(path, header_size=4096, image_size=2048):
     """ function reads in an image(s) from the ge2 detector 
     
     inputs:
-    
     path              : path to image file 
     header_size       : size of image header in bits
     image_size        : size of each image in pixels 
     
     outputs:
-    
     images            : numpy array of images (number of images x image size x image size) """
     
     fid        = open(path, 'r')                    
@@ -50,22 +59,22 @@ def ge2_reader(path, header_size=4096, image_size=2048):
     images     = np.array(image_1d[header_size:].reshape(num_images,image_size,image_size), dtype=float)
     
     return images
-    
+  
+
+  
 def get_ge2_path(directory, dir_num, file_num, file_num_digits=5):
     """ function creates the path to a .ge2 file using Chess conventions
     
     inputs:
-    
     directory         : directory where .ge2 image is located (1 above specific data point directory)
     dir_num           : specific data point directory number
     file_num          : number in .ge2 file name
     file_num_digits   : number of digits in .ge2 file name
     
     outputs:
-    
     path              : path to desired .ge2 file """
     
     file_name  = 'ff_' + (file_num_digits-len(str(file_num)))*'0' + str(file_num) + '.ge2'
-    path       = directory + str(dir_num) + '/ff/' + file_name
+    path       = os.path.join(directory, str(dir_num), 'ff', file_name)
     
     return path
