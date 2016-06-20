@@ -11,128 +11,122 @@ Peak fitting routines are adapted from the fitting example given in:
 Gaussian and Pseudo-Voight functions are addapted from examples in APEXRD
 
 """
-import numpy
-import math
-
+import numpy as np
+import numpy.linalg as la
 from scipy.optimize import leastsq           # Levenberg-Marquadt Algorithm #
-#from savitzky_golay import savitzky_golay   # Smoothing algorithm ##
 from scipy.interpolate import interp1d
+#from savitzky_golay import savitzky_golay   # Smoothing algorithm ##
 
-def lorentzian(x,p):       # two sided Lorentz function
-    #min_step = x[1] - x[0]
-    ind1     = (x<= p[1])  
-    x1       = x[ind1]  
-    ind2     = (x > p[1])
-    x2       = x[ind2]
-        
-    NLL      = (p[0]**2 )
-    DLL      = ( x1 - (p[1]) )**2 + p[0]**2
-    NRL      = (p[2]**2 )
-    DRL      = ( x2 - (p[1]) )**2 + p[2]**2
-    LL       = p[3]*(NLL/DLL)
-    RL       = p[3]*(NRL/DRL)
-    lin_comb = numpy.hstack((LL,RL))
+def lorentzian(x, param):       # two sided Lorentz function
+
+    peakCtr, fwhmL, fwhmR, amp = param
+
+    xL       = x[x<=peakCtr]  
+    NLL      = fwhmL**2
+    DLL      = (xL-peakCtr)**2 + fwhmL**2
+    LL       = amp*(NLL/DLL)
     
-    return lin_comb
+    xR       = x[x>peakCtr]
+    NRL      = fwhmR**2
+    DRL      = (xR-peakCtr)**2 + fwhmR**2
+    RL       = amp*(NRL/DRL)
+    
+    return np.hstack([LL,RL])
    
-def gaussian(x,p):         # two sided gaussian function
-    ind1     = (x<= p[1]) 
-    x1       = x[ind1]  
-    ind2     = (x > p[1])
-    x2       = x[ind2]
-    		
-    NLG      = -(x1 - p[1])**2
-    DLG      = 2*(p[0])**2
-    NRG      = -(x2 - p[1])**2
-    DRG      = 2*(p[2])**2
-    LG       = p[3]*numpy.exp(NLG/DLG)
-    RG       = p[3]*numpy.exp(NRG/DRG)
-    lin_comb = numpy.hstack((LG,RG))
-    
-    return lin_comb
+def gaussian(x, param):         # two sided gaussian function
 
-def pseudovoigt(x,p,n):    # two sided Pseudo-Voight function
-    ind1     = (x<= p[1])  
-    x1       = x[ind1]  
-    ind2     = (x > p[1])
-    x2       = x[ind2]
+    peakCtr, fwhmL, fwhmR, amp = param
     
-    gL       = p[0]/2
-    gR       = p[2]/2
-    sL       = p[0]/(2*math.sqrt(2*math.log(2)))
-    sR       = p[2]/(2*math.sqrt(2*math.log(2)))
+    xL       = x[x<=peakCtr]  
+    NLG      = (xL-peakCtr)**2
+    DLG      = 2*(fwhmL)**2
+    LG       = amp*np.exp(-NLG/DLG)
     
-    NLL      = (gL**2 )
-    DLL      = ( x1 - (p[1]) )**2 + gL**2
-    NRL      = (gR**2 )
-    DRL      = ( x2 - (p[1]) )**2 + gR**2
+    xR       = x[x>peakCtr]
+    NRG      = (xR-peakCtr)**2
+    DRG      = 2*(fwhmR)**2
+    RG       = amp*np.exp(-NRG/DRG)
     
-    LL       = p[3]*(NLL/DLL)
-    RL       = p[3]*(NRL/DRL)
-    CombL    = numpy.hstack((LL,RL))
+    return np.hstack([LG,RG])
+
+def pseudovoigt(x, param, n):    # two sided Pseudo-Voight function 
+
+    peakCtr, fwhmL, fwhmR, amp = param
     
-    NLG      = -(x1 - p[1])**2
+    xL       = x[x<=peakCtr]  
+    
+    gL       = fwhmL/2
+    NLL      = gL**2
+    DLL      = (xL-peakCtr)**2 + gL**2
+    LL       = amp*(NLL/DLL)
+    
+    sL       = fwhmL/(2*np.sqrt(2*np.log(2)))
+    NLG      = -(xL-peakCtr)**2
     DLG      = 2*(sL)**2
-    NRG      = -(x2 - p[1])**2
+    LG       = amp*np.exp(NLG/DLG)
+    
+    xR       = x[x> peakCtr]
+    
+    gR       = fwhmR/2
+    NRL      = gR**2
+    DRL      = (xR-peakCtr)**2 + gR**2
+    RL       = amp*(NRL/DRL)
+    
+    sR       = fwhmR/(2*np.sqrt(2*np.log(2)))
+    NRG      = -(xR-peakCtr)**2
     DRG      = 2*(sR)**2
+    RG       = amp*np.exp(NRG/DRG)
     
-    LG       = p[3]*numpy.exp(NLG/DLG)
-    RG       = p[3]*numpy.exp(NRG/DRG)
-    CombG    = numpy.hstack((LG,RG))
-    
+    CombL    = np.hstack((LL,RL))
+    CombG    = np.hstack((LG,RG))
     Comb     = n*CombL + (1-n)*CombG
     
     return Comb
 
-def residualsL(p,y,x):
-    err = y - lorentzian(x,p)
-    return err
+def residualsL(param, x, y):
+    return y - lorentzian(x, param) 
 
-def residualsG(p,y,x):
-    err = y - gaussian(x,p)
-    return err
+def residualsG(param, x, y):
+    return y - gaussian(x, param)
 
-def residualsPV(p,y,x,n):
-    err = y - pseudovoigt(x,p,n)
-    return err
+def residualsPV(param, x, y, n):
+    return y - pseudovoigt(x, param, n)
 
 
-def fitPeak(x, y_bg_corr, FWHM, peakCtr, Am, FitType = 'Lorentzian', n = 1):  
+def fitPeak(x, y, peakCtr, fwhm=10, amp=3000, FitType='Gaussian', n=1):  
     """
-    Lorentzian will be the default fit unless another is specified.
+    Gaussian will be the default fit unless another is specified.
     For the Pseudo-Voight fit n=1 will be default unless another is specified
     n is a mixing parameter, it is not necessary for the Lorentzian or Gaussian fits
     """
-    p = [FWHM,peakCtr,FWHM, Am]
+    param = [peakCtr, fwhm, fwhm, amp]
+    
     if FitType == 'Lorentzian':
-        best_parameters = leastsq(residualsL, p, args=(y_bg_corr,x), full_output=1)[0]
-        fit             = lorentzian(x,best_parameters)
+        param_opt = leastsq(residualsL,  param, args=(x, y),    full_output=1)[0]
+        fit       = lorentzian(x, param_opt)
+        err       = la.norm( residualsL(param_opt, x, y), 2.0)
+        
     elif FitType == 'Gaussian':
-        best_parameters = leastsq(residualsG,p,args=(y_bg_corr,x),full_output=1)[0]
-        fit             = gaussian(x,best_parameters)
+        param_opt = leastsq(residualsG,  param, args=(x, y),    full_output=1)[0]
+        fit       = gaussian(x, param_opt)
+        err       = la.norm( residualsG(param_opt, x, y), 2.0)
+        
     elif FitType == 'PseudoVoigt':
-        best_parameters = leastsq(residualsPV,p,args=(y_bg_corr,x,n),full_output=1)[0]
-        fit             = pseudovoigt(x,best_parameters,n)
+        param_opt = leastsq(residualsPV, param, args=(x, y, n), full_output=1)[0]
+        fit       = pseudovoigt(x, param_opt, n)
+        err       = la.norm( residualsPV(param_opt, x, y, n), 2.0)
 
-    return fit, best_parameters
+    return fit, param_opt, err
     
-# Develop background of a function
-def developBackground(x,y,peakCtr,loCut,hiCut): 
-    # defining the 'background' part of the spectrum #
-    ind_bg_low  = (x > (peakCtr-hiCut)) & (x < (peakCtr-loCut)) 
-    ind_bg_high = (x > (peakCtr+loCut)) & (x < (peakCtr+hiCut))
     
-    x_bg        = numpy.concatenate((x[ind_bg_low], x[ind_bg_high]))
-    y_bg        = numpy.concatenate((y[ind_bg_low], y[ind_bg_high]))
+def RemoveBackground(x, y, loCut, hiCut):
     
-    # interpolating the background #
-    f           = interp1d(x_bg,y_bg)
+    x_bg        = np.concatenate([ x[x<loCut], x[x>hiCut] ])
+    y_bg        = np.concatenate([ y[x<loCut], y[x>hiCut] ])
+    
+    f           = interp1d(x_bg, y_bg)
     background  = f(x)
     
-    return background
-    
-def RemoveBackground(x,y,peakCtr,loCut,hiCut):
-    background = developBackground(x, y, peakCtr, loCut, hiCut)
-    yClean     = y - background
+    yClean      =  y - background
     
     return yClean, background
