@@ -8,13 +8,8 @@ import numpy as np
 import numpy.linalg as la
 import matplotlib.pyplot as plt
 import scipy.optimize
-import importlib
 import DataReader
 import PeakFitting
-DataReader  = importlib.reload(DataReader)
-PeakFitting = importlib.reload(PeakFitting)
-
-
 
 def total_variation(y, lamb=0):
     
@@ -26,7 +21,7 @@ def total_variation(y, lamb=0):
     
     # optimization 
     def obj(x, y, lamb, D2): 
-        return la.norm(x-y, 2.0)**2 + lamb*la.norm(D2@x, 1.0)
+        return la.norm(x-y, 2.0)**2 + lamb*la.norm(np.dot(D2, x), 1.0)
      
     x0           = np.mean(y)*np.ones(n)  # initial guess
     opt_results  = scipy.optimize.minimize(obj, x0, args=(y, lamb, D2))
@@ -53,7 +48,7 @@ def get_indices(peak, ctr=0.5, lo=0.25, hi=0.75):
 
 
     
-def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, FWHM=10, Am=2000):
+def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, strip_loc = 0.5, FWHM=10, Am=2000):
     """ function fits a peak to a summed strip of a ge2 detector image
     
     inputs:
@@ -73,24 +68,29 @@ def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, FWHM=10,
         line              = np.sum(vertical_strip, axis=1)
         
     if strip_orient == 'h':
-        horizontal_strip  = image[ image.shape[0]//2-strip_width//2 : image.shape[0]//2+strip_width//2 , :]
+        center_index      = int(round(image.shape[0]*strip_loc))
+        lower_bound       = np.max([center_index-strip_width//2, 0])
+        upper_bound       = np.min([image.shape[0], center_index+strip_width//2])
+        horizontal_strip  = image[ lower_bound : upper_bound , :]
         line              = np.sum(horizontal_strip, axis=0)
     
     peak                  = line[pix_rng[0]:pix_rng[1]]
     x_index               = np.linspace(1,len(peak),num=len(peak))
     peakCtr, loCut, hiCut = get_indices(peak)
     y_bg_corr, background = PeakFitting.RemoveBackground(x_index, peak, peakCtr, loCut, hiCut)
-    fit, best_parameter   = PeakFitting.fitPeak(x_index, y_bg_corr, FWHM, peakCtr, Am)
+    fit, best_parameter   = PeakFitting.fitPeak(x_index, y_bg_corr, FWHM, peakCtr, Am, FitType = 'Gaussian')
     fit_center            = best_parameter[1]
     true_center           = fit_center + pix_rng[0]
-
+    std_dev_left          = best_parameter[0]
+    std_dev_right         = best_parameter[2]
+    """
     plt.close('all')
     plt.plot(x_index, y_bg_corr, 'ok')
     plt.plot(x_index, fit,       '-r')
     plt.savefig(peak_path)
     plt.close('all')
-
-    return true_center     
+    """
+    return true_center, std_dev_left, std_dev_right
 
 
 
