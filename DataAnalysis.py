@@ -67,22 +67,8 @@ def get_average_strip(xray_dir, first_folder, first_file_num, num_data_pts, stri
         if strip_orient == 'v':
             strips[i_data_pt]  =  image[ :, image.shape[1]//2-strip_width//2 : image.shape[1]//2+strip_width//2 ]
     
-<<<<<<< HEAD
-def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, strip_loc = 0.5, FWHM=10, Am=2000):
-=======
-        if strip_orient == 'h':
-            strips[i_data_pt]  = image[ image.shape[0]//2-strip_width//2 : image.shape[0]//2+strip_width//2 , :]
-            
-    if strip_orient == 'v': 
-        return np.mean(strips, axis=1)
     
-    if strip_orient == 'h':
-        return np.mean(strips, axis=0)
- 
-
-   
-def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, fwhm0, amp0):
->>>>>>> 8776a81ec32c4f7930dac524ee228f1edd1da7a9
+def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, strip_loc = 0.5, FWHM=10, Am=2000):
     """ function fits a peak to a summed strip of a ge2 detector image
     
     inputs:
@@ -107,9 +93,8 @@ def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, fwhm0, a
         line              = np.sum(horizontal_strip, axis=0)
     
     peak                  = line[pix_rng[0]:pix_rng[1]]
-<<<<<<< HEAD
     x_index               = np.linspace(1,len(peak),num=len(peak))
-    peakCtr, loCut, hiCut = get_indices(peak)
+    peakCtr, loCut, hiCut = get_peak_fit_indices(peak)
     y_bg_corr, background = PeakFitting.RemoveBackground(x_index, peak, peakCtr, loCut, hiCut)
     fit, best_parameter   = PeakFitting.fitPeak(x_index, y_bg_corr, FWHM, peakCtr, Am, FitType = 'Gaussian')
     fit_center            = best_parameter[1]
@@ -117,7 +102,6 @@ def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, fwhm0, a
     std_dev_left          = best_parameter[0]
     std_dev_right         = best_parameter[2]
     """
-=======
     x                     = np.arange(len(peak))
     peakCtr, loCut, hiCut = get_peak_fit_indices(peak)
     peak_bg_rm, _         = PeakFitting.RemoveBackground(x, peak, loCut, hiCut)
@@ -125,7 +109,7 @@ def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, fwhm0, a
     peak_ctr              = p_opt[0]
     true_center           = peak_ctr + pix_rng[0]
 
->>>>>>> 8776a81ec32c4f7930dac524ee228f1edd1da7a9
+
     plt.close('all')
     plt.plot([peak_ctr,peak_ctr],[0,np.max(peak)],'--r')
     plt.plot(x, peak,       'ok')
@@ -133,13 +117,8 @@ def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, fwhm0, a
     plt.plot(x, peak_fit,   '-r', lw=3)
     plt.savefig(peak_path)
     plt.close('all')
-<<<<<<< HEAD
     """
     return true_center, std_dev_left, std_dev_right
-=======
-
-    return true_center, err 
->>>>>>> 8776a81ec32c4f7930dac524ee228f1edd1da7a9
 
 
 
