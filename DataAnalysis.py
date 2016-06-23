@@ -66,7 +66,7 @@ def total_variation(y, lamb=0):
     
     # optimization 
     def obj(x, y, lamb, D2): 
-        return la.norm(x-y, 2.0)**2 + lamb*la.norm(D2@x, 1.0)
+        return la.norm(x-y, 2.0)**2 + lamb*la.norm(np.dot(D2, x), 1.0)
      
     x0          = np.mean(y)*np.ones(y.shape[0])   # initial guess
     opt_results = scipy.optimize.minimize(obj, x0, args=(y, lamb, D2))
@@ -126,37 +126,8 @@ def get_peak_fit_indices(peak, ctr=0.5, lo=0.2, hi=0.8):
     return peakCtr, loCut, hiCut
 
 
-
-def get_average_strip(xray_dir, first_folder, first_file_num, num_data_pts, strip_width, strip_orient, image_size=2048):
-       
-    dark_path   = DataReader.get_ge2_path(xray_dir, first_folder, first_file_num)
-    dark_image  = DataReader.ge2_reader(dark_path)[0]
     
-    strips      = np.zeros((num_data_pts, strip_width, image_size))
-    
-    for i_data_pt in range(num_data_pts):
-        dir_num               = first_folder    + i_data_pt
-        file_num              = first_file_num  + i_data_pt
-        print('reading image ' + str(dir_num))
-        path                  = DataReader.get_ge2_path(xray_dir, dir_num, file_num)
-        image                 = DataReader.ge2_reader(path)[0]  # only using first image because of shutter timing error
-        image                -= dark_image    
-        
-        if strip_orient == 'v':
-            strips[i_data_pt]  =  image[ :, image.shape[1]//2-strip_width//2 : image.shape[1]//2+strip_width//2 ]
-    
-        if strip_orient == 'h':
-            strips[i_data_pt]  = image[ image.shape[0]//2-strip_width//2 : image.shape[0]//2+strip_width//2 , :]
-            
-    if strip_orient == 'v': 
-        return np.mean(strips, axis=1)
-    
-    if strip_orient == 'h':
-        return np.mean(strips, axis=0)
- 
-
-   
-def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, fwhm0, amp0):
+def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, fwhm0, amp0, strip_loc = 0.5):
     """ function fits a peak to a summed strip of a ge2 detector image
     
     inputs:
@@ -174,7 +145,10 @@ def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, fwhm0, a
         line              = np.sum(vertical_strip, axis=1)
         
     if strip_orient == 'h':
-        horizontal_strip  = image[ image.shape[0]//2-strip_width//2 : image.shape[0]//2+strip_width//2 , :]
+        center_index      = int(round(image.shape[0]*strip_loc))
+        lower_bound       = np.max([center_index-strip_width//2, 0])
+        upper_bound       = np.min([image.shape[0], center_index+strip_width//2])
+        horizontal_strip  = image[ lower_bound : upper_bound , :]
         line              = np.sum(horizontal_strip, axis=0)
     
     peak                  = line[pix_rng[0]:pix_rng[1]]
@@ -192,13 +166,14 @@ def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, fwhm0, a
     plt.plot(x, peak_fit,   '-r', lw=3)
     plt.savefig(peak_path)
     plt.close('all')
-    
+
     del line, peak, x, peak_bg_rm, peak_fit
 
     return true_center, err 
 
 
-def write_scan_diameters(sample, ring, x, z, step_num, orient, err_thres = 0.2,fwhm0=10, amp0=3000):
+
+def write_scan_diameters(sample, ring, x, z, step_num, orient, err_thres = 0.2, fwhm0=10, amp0=3000):
 
     if orient == 'h':    
         l_peak_rng = ring.left
@@ -236,9 +211,7 @@ def write_scan_diameters(sample, ring, x, z, step_num, orient, err_thres = 0.2,f
         u_centers[i_data_pt], u_errs[i_data_pt]  = analyze_strip(image, orient, ring.strip_width, u_peak_rng, peak_path, fwhm0, amp0)
         
         diams[i_data_pt]                         = u_centers[i_data_pt] - l_centers[i_data_pt]
-        
-        print(diams[i_data_pt], l_errs[i_data_pt], u_errs[i_data_pt])
-        
+                
         del image
 
     # write data to a text file
