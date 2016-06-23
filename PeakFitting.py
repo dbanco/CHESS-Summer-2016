@@ -104,17 +104,17 @@ def fitPeak(x, y, peakCtr, fwhm=10, amp=3000, FitType='Gaussian', n=1):
     if FitType == 'Lorentzian':
         param_opt = leastsq(residualsL,  param, args=(x, y),    full_output=1)[0]
         fit       = lorentzian(x, param_opt)
-        err       = la.norm( residualsL(param_opt, x, y), 2.0)
+        err       = la.norm( residualsL(param_opt, x, y), 2.0) / la.norm(y, 2.0)
         
     elif FitType == 'Gaussian':
         param_opt = leastsq(residualsG,  param, args=(x, y),    full_output=1)[0]
         fit       = gaussian(x, param_opt)
-        err       = la.norm( residualsG(param_opt, x, y), 2.0)
+        err       = la.norm( residualsG(param_opt, x, y), 2.0) / la.norm(y, 2.0)
         
     elif FitType == 'PseudoVoigt':
         param_opt = leastsq(residualsPV, param, args=(x, y, n), full_output=1)[0]
         fit       = pseudovoigt(x, param_opt, n)
-        err       = la.norm( residualsPV(param_opt, x, y, n), 2.0)
+        err       = la.norm( residualsPV(param_opt, x, y, n), 2.0) / la.norm(y, 2.0)
 
     return fit, param_opt, err
     

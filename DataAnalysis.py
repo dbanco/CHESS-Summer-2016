@@ -7,12 +7,56 @@ Data Analysis Functions
 import numpy as np
 import numpy.linalg as la
 import matplotlib.pyplot as plt
-import scipy.optimize
-import importlib
+import os, importlib, scipy.optimize
 import DataReader, PeakFitting, Toolbox
 DataReader  = importlib.reload(DataReader)
 PeakFitting = importlib.reload(PeakFitting)
 Toolbox     = importlib.reload(Toolbox)
+
+
+class Specimen:
+    def __init__(self, name, data_dir, out_dir, x_range, x_num, z_range, z_num, step_names, dark_dirs, init_dirs):
+
+        self.name             = name
+        self.data_dir         = data_dir+name+'/'
+        self.out_dir          = out_dir +name+'/'        
+        
+        if not os.path.exists(self.out_dir):
+            os.mkdir(self.out_dir)        
+        if not os.path.exists(self.out_dir+'peaks/'):
+            os.mkdir(self.out_dir+'peaks/')
+        if not os.path.exists(self.out_dir+'results/'):
+            os.mkdir(self.out_dir+'results/')       
+        
+        self.x_range          = x_range
+        self.x_num            = x_num
+        self.z_range          = z_range
+        self.z_num            = z_num
+        self.step_names       = step_names
+        self.n_load_step      = len(step_names)
+        self.dark_dirs        = dark_dirs
+        self.init_dirs        = init_dirs
+        self.n_data_pt        = x_num*z_num
+        
+
+class Ring:
+    def __init__(self, name, sample, left_range, right_range, top_range, bottom_range, lambda_sel, strip_width=50):
+        
+        self.name             = name
+        self.peak_dir         = sample.out_dir+'peaks/'+name+'/'
+        self.out_dir          = sample.out_dir+'results/'+name+'/'
+        
+        if not os.path.exists(self.peak_dir):
+            os.mkdir(self.peak_dir)
+        if not os.path.exists(self.out_dir):
+            os.mkdir(self.out_dir)
+            
+        self.left             = left_range
+        self.right            = right_range
+        self.top              = top_range
+        self.bottom           = bottom_range
+        self.strip_width      = strip_width
+        self.lambda_sel       = lambda_sel
 
 
 def total_variation(y, lamb=0):
@@ -29,6 +73,40 @@ def total_variation(y, lamb=0):
     
     return opt_results.x    
 
+
+def plot_data_fit(path, data, fit, descrip):
+    plt.close('all'), plt.ylabel('data'), plt.title(descrip)
+    plt.plot(data,  'or', ms=6, label='data points')
+    plt.plot(fit , '-ok', ms=6, label='optimized fit')
+    plt.grid(True), plt.legend(numpoints=1, bbox_to_anchor=(1.4, 1.02))
+    plt.savefig(path), plt.close('all')
+    
+    
+def test_lambdas(data, l_rng, nl=20):
+    
+    lambdas = np.linspace(l_rng[0], l_rng[1], num=nl)
+    error2  = np.zeros(nl)
+    
+    for i in range(nl):
+        data_opt  = total_variation(data, lambdas[i])
+        error2[i] = la.norm(data_opt-data, 2.0)**2
+        
+    plt.close('all')
+    plt.plot(lambdas, error2)
+    plt.xlabel('lambda'), plt.ylabel('2-norm of error squared')
+    plt.grid(True), plt.show()
+
+
+def find_ref_diam(diams, ref0):
+    
+    def strain_integral(ref, diams):
+        strain = (ref - diams) / ref
+        return np.sum(strain**2)
+
+    result = scipy.optimize.minimize(strain_integral, ref0, args=(diams))
+    assert result.success == True
+        
+    return result.x
 
 
 def get_peak_fit_indices(peak, ctr=0.5, lo=0.2, hi=0.8):
@@ -48,27 +126,8 @@ def get_peak_fit_indices(peak, ctr=0.5, lo=0.2, hi=0.8):
     return peakCtr, loCut, hiCut
 
 
-
-def get_average_strip(xray_dir, first_folder, first_file_num, num_data_pts, strip_width, strip_orient, image_size=2048):
-       
-    dark_path   = DataReader.get_ge2_path(xray_dir, first_folder, first_file_num)
-    dark_image  = DataReader.ge2_reader(dark_path)[0]
     
-    strips      = np.zeros((num_data_pts, strip_width, image_size))
-    
-    for i_data_pt in range(num_data_pts):
-        dir_num               = first_folder    + i_data_pt
-        file_num              = first_file_num  + i_data_pt
-        print('reading image ' + str(dir_num))
-        path                  = DataReader.get_ge2_path(xray_dir, dir_num, file_num)
-        image                 = DataReader.ge2_reader(path)[0]  # only using first image because of shutter timing error
-        image                -= dark_image    
-        
-        if strip_orient == 'v':
-            strips[i_data_pt]  =  image[ :, image.shape[1]//2-strip_width//2 : image.shape[1]//2+strip_width//2 ]
-    
-    
-def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, strip_loc = 0.5, FWHM=10, Am=2000):
+def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, fwhm0, amp0, strip_loc = 0.5):
     """ function fits a peak to a summed strip of a ge2 detector image
     
     inputs:
@@ -93,22 +152,12 @@ def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, strip_lo
         line              = np.sum(horizontal_strip, axis=0)
     
     peak                  = line[pix_rng[0]:pix_rng[1]]
-    x_index               = np.linspace(1,len(peak),num=len(peak))
-    peakCtr, loCut, hiCut = get_peak_fit_indices(peak)
-    y_bg_corr, background = PeakFitting.RemoveBackground(x_index, peak, peakCtr, loCut, hiCut)
-    fit, best_parameter   = PeakFitting.fitPeak(x_index, y_bg_corr, FWHM, peakCtr, Am, FitType = 'Gaussian')
-    fit_center            = best_parameter[1]
-    true_center           = fit_center + pix_rng[0]
-    std_dev_left          = best_parameter[0]
-    std_dev_right         = best_parameter[2]
-    """
     x                     = np.arange(len(peak))
     peakCtr, loCut, hiCut = get_peak_fit_indices(peak)
     peak_bg_rm, _         = PeakFitting.RemoveBackground(x, peak, loCut, hiCut)
     peak_fit, p_opt, err  = PeakFitting.fitPeak(x, peak_bg_rm, peakCtr, fwhm0, amp0)
     peak_ctr              = p_opt[0]
     true_center           = peak_ctr + pix_rng[0]
-
 
     plt.close('all')
     plt.plot([peak_ctr,peak_ctr],[0,np.max(peak)],'--r')
@@ -117,51 +166,66 @@ def analyze_strip(image, strip_orient, strip_width, pix_rng, peak_path, strip_lo
     plt.plot(x, peak_fit,   '-r', lw=3)
     plt.savefig(peak_path)
     plt.close('all')
-    """
-    return true_center, std_dev_left, std_dev_right
+
+    del line, peak, x, peak_bg_rm, peak_fit
+
+    return true_center, err 
 
 
 
-def write_scan_diameters(xray_dir, out_dir, peak_dir, first_folder, first_file_num, descrip, num_data_pts, strip_width, orient, lt_peak_rng, rb_peak_rng, fwhm0=10, amp0=3000):
+def write_scan_diameters(sample, ring, x, z, step_num, orient, err_thres = 0.2, fwhm0=10, amp0=3000):
+
+    if orient == 'h':    
+        l_peak_rng = ring.left
+        u_peak_rng = ring.right
+    if orient == 'v':
+        l_peak_rng = ring.top
+        u_peak_rng = ring.bottom
             
-    dark_path             = DataReader.get_ge2_path(xray_dir, first_folder, first_file_num)
-    dark_image            = DataReader.ge2_reader(dark_path)[0]
+    dark_path             = sample.data_dir+str(sample.dark_dirs[step_num])+'/ff/'
+    dark_file             = os.listdir(dark_path)
+    assert len(dark_file) == 1
+    dark_image            = DataReader.ge2_reader(dark_path+dark_file[0])
+    if len(dark_image.shape) > 1:
+        dark_image        = np.mean(dark_image, axis=0)
     
-    lt_centers, lt_errs   = np.zeros(num_data_pts), np.zeros(num_data_pts)
-    rb_centers, rb_errs   = np.zeros(num_data_pts), np.zeros(num_data_pts)
-    diams                 = np.zeros(num_data_pts)  # ring diameters
+    l_centers, l_errs     = np.zeros(sample.n_data_pt), np.zeros(sample.n_data_pt)
+    u_centers, u_errs     = np.zeros(sample.n_data_pt), np.zeros(sample.n_data_pt)
+    diams                 = np.zeros(sample.n_data_pt)  
      
-    for data_pt in range(num_data_pts):
+    for i_data_pt in range(sample.n_data_pt):
         
-        dir_num               = first_folder   + data_pt
-        file_num              = first_file_num + data_pt
+        dir_num               = sample.init_dirs[step_num] + i_data_pt
+        path                  = sample.data_dir+str(dir_num)+'/ff/'
+        file                  = os.listdir(path)
+        assert len(file) == 1
         
         print('reading image ' + str(dir_num))
-        path                  = DataReader.get_ge2_path(xray_dir, dir_num, file_num)
-        image                 = DataReader.ge2_reader(path)[0]  # only using first image because of shutter timing error
-        image                -= dark_image                       # subtract dark image
+        image                 = DataReader.ge2_reader(path+file[0])[0]  # only using first image because of shutter timing error
+        image                -= dark_image                              # subtract dark image
         
-        peak_path             = peak_dir+'peak_'+str(dir_num)+orient+'lt'+'.tiff'
-        center, err           = analyze_strip(image, orient, strip_width, lt_peak_rng, peak_path, fwhm0, amp0)
-        lt_centers[data_pt]   = center
-        lt_errs[data_pt]      = err
+        peak_path                                = ring.peak_dir+orient+'_lower_'+str(dir_num)+'.tiff'
+        l_centers[i_data_pt], l_errs[i_data_pt]  = analyze_strip(image, orient, ring.strip_width, l_peak_rng, peak_path, fwhm0, amp0)
+        
+        peak_path                                = ring.peak_dir+orient+'_upper_'+str(dir_num)+'.tiff'
+        u_centers[i_data_pt], u_errs[i_data_pt]  = analyze_strip(image, orient, ring.strip_width, u_peak_rng, peak_path, fwhm0, amp0)
+        
+        diams[i_data_pt]                         = u_centers[i_data_pt] - l_centers[i_data_pt]
                 
-        peak_path             = peak_dir+'peak_'+str(dir_num)+orient+'rb'+'.tiff'
-        center, err           = analyze_strip(image, orient, strip_width, rb_peak_rng, peak_path, fwhm0, amp0)
-        rb_centers[data_pt]   = center
-        rb_errs[data_pt]      = err
-        
-        diams[data_pt]        = rb_centers[data_pt] - lt_centers[data_pt]
+        del image
 
     # write data to a text file
-    out_file = open(out_dir+descrip+orient+'.txt', 'w')
-    for data_pt in range(num_data_pts):
-        out_file.write('%18.14f'%diams[data_pt] + '\n')
+    out_file = open(ring.out_dir+sample.step_names[step_num]+'_diams_'+orient+'.txt', 'w')
+    for i_data_pt in range(sample.n_data_pt):
+        if l_errs[i_data_pt] <= err_thres and u_errs[i_data_pt] <= err_thres:
+            out_file.write('%18.12f'%x[i_data_pt]     + '\t')
+            out_file.write('%18.12f'%z[i_data_pt]     + '\t')
+            out_file.write('%18.12f'%diams[i_data_pt] + '\n')
     out_file.close()     
     
-    return lt_centers, lt_errs, rb_centers, rb_errs, diams
+    return l_centers, l_errs, u_centers, u_errs, diams
 
-    
+  
 def find_closest_vic2d(vic2d_data, x, y, out_index, x_ind=5, y_ind=6):
     """ function finds the closest vic2d data point to desired data points described by x and y locations
     

@@ -96,5 +96,6 @@ def get_ge2_path(directory, dir_num, file_num, file_num_digits=5):
     
     file_name  = 'ff_' + (file_num_digits-len(str(file_num)))*'0' + str(file_num) + '.ge2'
     path       = os.path.join(directory, str(dir_num), 'ff', file_name)
+
     
     return path
