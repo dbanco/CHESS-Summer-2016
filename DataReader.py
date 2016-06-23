@@ -7,7 +7,6 @@ Data Reading Functions
 import os
 import numpy as np
 import csv
-import os
 
 
 
@@ -39,6 +38,26 @@ def vic2d_reader(path):
     
     return data    
 
+
+def mmpad_reader(path, num_images=10000, image_size=[266, 396], chip_size=128):
+    """ function reads in image(s) from the mmpad detector  
+    
+    inputs:
+    path              : path to image file 
+    header_size       : size of image header in bits
+    image_size        : size of each image in pixels 
+    
+    outputs:
+    images            : numpy array of images (number of images x image size x image size) """
+    
+    fid        = open(path, 'r')                    
+    images_1d  = np.fromfile(fid, dtype=np.float32)  
+    fid.close()                                     
+    
+    images     = images_1d.reshape((num_images, image_size[0], image_size[1]))
+    images     = images[:, 1:1+chip_size, 1:1+chip_size]
+
+    return images
 
 
 def ge2_reader(path, header_size=4096, image_size=2048):
@@ -76,10 +95,6 @@ def get_ge2_path(directory, dir_num, file_num, file_num_digits=5):
     path              : path to desired .ge2 file """
     
     file_name  = 'ff_' + (file_num_digits-len(str(file_num)))*'0' + str(file_num) + '.ge2'
-<<<<<<< Updated upstream
     path       = os.path.join(directory, str(dir_num), 'ff', file_name)
-=======
-    path       = os.path.join(directory, str(dir_num),'ff', file_name)
->>>>>>> Stashed changes
     
     return path
