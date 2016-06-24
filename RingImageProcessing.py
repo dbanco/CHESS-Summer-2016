@@ -6,7 +6,7 @@ Created on Sat Jun 11 16:08:40 2016
 import numpy as np
 from scipy.optimize import leastsq
 import matplotlib.pyplot as plt
-
+from scipy.signal import argrelmax
 """
 #### User Inputs (edge of circle coordinates) ####
 x  = np.array([ 5.949, 5.699, 4.599, 3.25, 5.299 ])
@@ -90,12 +90,203 @@ def distance_threshold(img,radius_low,radius_high,center=0):
     
     return bin_img
 
-"""
-Gets coordinates and values of img from true values in binary image
-"""
+
 def get_points(img,bin_img):
+    """
+    Gets coordinates and values of img from true values in binary image
+    inputs
+            img an image
+            bin_img a binary image
+            
+    outputs
+            x    x coordinate of pixels
+            y    y coordinate of pixels
+            f    value of pixels
+    """
     x,y = np.nonzero(bin_img)
     f = img[x,y]
     return x,y,f
 
+
+def radial_projection(img,center,r,num_r,theta,r_in,r_out,):
+    """
+    Interpolates along a line in the radial direction
+    
+    inputs
+            img     image
+            center  center of the rings in the image
+            r       radius of ring of interest
+            num_r   number of points to sample along line
+            theta   angle of line
+            r_in    inside radius containing ring
+            r_out   outside radius containing ring]
+            
+    outputs
+            r_project  image values at points along line
+            r_domain   domain over which image values are defined
+    """
+    n,m = img.shape
+    if(center==0): center = [round(n/2.0),round(m/2.0)]  
+
+    r_domain  =   np.linspace(r_in,r_out,num_r)
+    r_project = np.zeros(r_domain.shape)
+    
+    for ridx in range(len(r_domain)):
+        # identify surrounding four points
+        x = r_domain[ridx]*np.cos(theta) + center[0]
+        y = r_domain[ridx]*np.sin(theta) + center[1]     
+        x1 = np.floor( x )
+        x2 = np.ceil(  x )
+        y1 = np.floor( y )
+        y2 = np.ceil(  y )
+  
+        # make sure we are in image
+        if( (x1 < n) & (x2 < n) & (x1 > 0) & (x2 > 0) &
+            (y1 < m) & (y2 < m) & (y1 > 0) & (y2 > 0) ):
+            if(x2-x1 == 0 & y2-y1 == 0):
+                r_project[ridx] = img[x1,y1]
+            elif(x2-x1 == 0):
+                r_project[ridx] = img[x1,y1] + \
+                                (img[x2,y2]-img[x1,y1])*(y-y1)/(y2-y1)
+            elif(y2-y1 == 0):
+                r_project[ridx] = img[x1,y1] + \
+                                (img[x2,y2]-img[x1,y1])*(x-x1)/(x2-x1)
+            else:
+                
+                # interpolate
+                a = np.matrix([x2-x,x-x1])
+                Q = np.matrix([[img[x1,y1],img[x1,y2]],
+                              [img[x2,y1],img[x2,y2]]])      
+                b = np.matrix([[y2-y],[y-y1]])
+                r_project[ridx] = np.dot(np.dot(a,Q),b)/((x2-x1)*(y2-y1))
+
+    return r_project, r_domain
+
+def azimuthal_projection(img,center,r,theta_1,theta_2,num_theta):
+    """
+    Interpolates along a line in the radial direction
+    
+    inputs
+            img         image
+            center      center of the rings in the image
+            r           radius of ring of interest     
+            theta_1     inside radius containing ring
+            theta_2     outside radius containing ring
+            num_theta   number of samples along theta
+            
+    outputs
+            r_project  image values at points along line
+            r_domain   domain over which image values are defined
+    """
+    n,m = img.shape
+    if(center==0): center = [round(n/2.0),round(m/2.0)]  
+
+    theta_domain  =   np.linspace(theta_1,theta_2,num_theta)
+    theta_project = np.zeros(theta_domain.shape)
+    
+    for tidx in range(len(theta_domain)):
+        # identify surrounding four points
+        x = r*np.cos(theta_domain[tidx]) + center[0]
+        y = r*np.sin(theta_domain[tidx]) + center[1]     
+        x1 = np.floor( x )
+        x2 = np.ceil(  x )
+        y1 = np.floor( y )
+        y2 = np.ceil(  y )
+  
+        # make sure we are in image
+        if( (x1 < n) & (x2 < n) & (x1 > 0) & (x2 > 0) &
+            (y1 < m) & (y2 < m) & (y1 > 0) & (y2 > 0) ):
+            if((x2-x1 == 0) & (y2-y1 == 0)):
+                theta_project[tidx] = img[x1,y1]
+            elif((x2-x1) == 0):
+                theta_project[tidx] = img[x1,y1] + \
+                                (img[x2,y2]-img[x1,y1])*(y-y1)/(y2-y1)
+            elif((y2-y1) == 0):
+                theta_project[tidx] = img[x1,y1] + \
+                                (img[x2,y2]-img[x1,y1])*(x-x1)/(x2-x1)
+            else:
+                
+                # interpolate
+                a = np.matrix([x2-x,x-x1])
+                Q = np.matrix([[img[x1,y1],img[x1,y2]],
+                              [img[x2,y1],img[x2,y2]]])      
+                b = np.matrix([[y2-y],[y-y1]])
+                theta_project[tidx] = np.dot(np.dot(a,Q),b)/((x2-x1)*(y2-y1))
+
+    return theta_project, theta_domain
+    
+    
+def gaussian_convolution(signal,sigma,C=4):
+    """
+    inputs
+            signal  a one dimensional signal (n,) numpy array
+            sigma   a standard deviation
+            C       constant to determine length of gaussian kernel
+            
+    outputs
+            filtered signal     convolution of gaussian kernel and input signal
+                                where signal length is preserved
+    """
+    
+    M = int(round(C*sigma + 1))
+    
+    gaussian = np.zeros(2*M+1)
+    amp = 1/(np.sqrt(2*np.pi)*sigma)
+    const = 1/(2*sigma)
+    
+    for m in range(-M,M+1):
+        gaussian[m+M] = np.exp(-const*m**2)
+    
+    G = amp*gaussian
+    
+    return np.convolve(signal,G,mode='same')
+    
+def find_scale_space_maxima(signal,sigma,C=4,octaves=4):
+    """
+    inputs
+            signal  a one dimensional signal (n,) numpy array
+            sigma   a standard deviation
+            C       constant to determine length of gaussian kernel
+            octaves number of scales over which to find maxima
+            
+    outputs
+            maxima  list of arrays containing locations of maxima at each scale
+    """
+    maxima = []
+    maxima.append(argrelmax(signal))
+    plt.figure(0)
+    plt.plot(signal)
+    for i in range(octaves):
+       filt_signal = gaussian_convolution(signal,2*(i+1)*sigma,C)
+       maxima.append(argrelmax(filt_signal)[0])
+#       plt.figure(i+1)
+       plt.plot(filt_signal)
+    return maxima
+        
+def do_peak_fit(data,param,plot_flag=0):
+    amp_est                 = np.max(data)
+    fwhm_est                = len(data)/2.0
+    fit_domain              = np.arange(len(data))
+    peakCtr, loCut, hiCut   = DA.get_peak_fit_indices(data)
+    data_rm_back, back       = peak.RemoveBackground(fit_domain,data,loCut,hiCut)
+    _, param_opt, err       = peak.fitPeak(fit_domain, data_rm_back, peakCtr, 
+                                       fwhm=fwhm_est, amp=amp_est,
+                                       FitType='Gaussian', n=1)
+                                       
+    mu, sigmaL, sigmaR, amp = param_opt
+    
+    if(plot_flag):
+        plt.close(1)
+        plt.figure(1)
+        plt.plot(r_domain,data_rm_back,'o-b') 
+        x_fit = np.linspace(fit_domain[0],fit_domain[-1],500)
+        r_fit = np.linspace(r_domain[0],r_domain[-1],500)
+        plt.plot(r_fit,peak.gaussian(x_fit,param_opt),'-r')   
+        title = str(i) + '_err_' + str(err) + '_param_' + str(param)
+        plt.title(title)
+        plt.savefig(os.path.join('plots',title + '.png'))
+
+    
+    return mu, ((sigmaL+sigmaR)/2)**2, amp, err
+    
     
