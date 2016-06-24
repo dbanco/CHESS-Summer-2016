@@ -9,9 +9,9 @@ import numpy.linalg as la
 import matplotlib.pyplot as plt
 import os, importlib, scipy.optimize
 import DataReader, PeakFitting, Toolbox
-DataReader  = reload(DataReader)
-PeakFitting = reload(PeakFitting)
-Toolbox     = reload(Toolbox)
+DataReader  = importlib.reload(DataReader)
+PeakFitting = importlib.reload(PeakFitting)
+Toolbox     = importlib.reload(Toolbox)
 
 
 class Specimen:
