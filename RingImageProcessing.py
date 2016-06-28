@@ -5,8 +5,12 @@ Created on Sat Jun 11 16:08:40 2016
 """
 import numpy as np
 from scipy.optimize import leastsq
+from scipy.ndimage.measurements import center_of_mass as com
 import matplotlib.pyplot as plt
 from scipy.signal import argrelmax
+import DataAnalysis as DA
+import PeakFitting as peak
+import os
 """
 #### User Inputs (edge of circle coordinates) ####
 x  = np.array([ 5.949, 5.699, 4.599, 3.25, 5.299 ])
@@ -28,7 +32,8 @@ def fit_circle_nonlin_lstsq(x, y, plot_flag=0):
         return J
     
     # nonlinear least squares fit
-    params0 = np.array([x[0], y[0], 5.0])  # use first data point as initial guess
+    r_guess = np.sqrt(x[0]**2 + y[0]**2)/2
+    params0 = np.array([x[0], y[0], r_guess])  # use first data point as initial guess
     params  = leastsq(residual, params0, args=(x,y), Dfun=Jacobian)[0]
     xc, yc, r = params    
     print('xc = '+'%11.8f'%xc, 'zc = '+'%11.8f'%yc, 'r = '+'%11.8f'%r)
@@ -50,7 +55,114 @@ def fit_circle_nonlin_lstsq(x, y, plot_flag=0):
         plt.show()
     
     return xc, yc, r
+
+def fit_ellipse_lstsq(x,y):
+    orientation_tol = 1e-3
+    mean_x = np.mean(x)
+    mean_y = np.mean(y)
+    x1 = x - mean_x
+    y1 = y - mean_y
     
+    X = np.array([x1**2, x1*y1, y1**2, x1, y1 ])
+    C = np.sum(X,axis=1)
+    A = np.dot(X,np.transpose(X))
+    B = np.linalg.solve(A,C)
+    
+    a = B[0]
+    b = B[1]
+    c = B[2]
+    d = B[3]
+    e = B[4]
+    
+    if( min(abs(b/a),abs(b/c)) > orientation_tol ):
+        orientation_rad = 0.5*np.arctan(b/(c-a))
+        cos_phi = np.cos( orientation_rad )
+        sin_phi = np.sin( orientation_rad )
+        a = a*cos_phi**2 - b*cos_phi*sin_phi + c*sin_phi**2
+        b = 0
+        c = a*sin_phi**2 + b*cos_phi*sin_phi + c*cos_phi**2
+        d = d*cos_phi - e*sin_phi
+        e = d*sin_phi + e*cos_phi
+        
+        mean_x = cos_phi*mean_x - sin_phi*mean_y
+        mean_y = sin_phi*mean_x + cos_phi*mean_y
+    else:
+        orientation_rad = 0
+        cos_phi = 1
+        sin_phi = 0
+    test = a*c
+    if( test < 0 ):
+        status = 'hyperbola found'
+        print( status + ': did not identify ellipse')
+    elif( test == 0):
+        status = 'parabola found'
+        print( status + ': did not identify ellipse')
+    elif( test > 0):
+        status = ''
+        if( a<0 ): 
+            a = -a
+            c = -c
+            d = -d
+            e = -e
+            
+        X0 = mean_x - d/2/a
+        Y0 = mean_y - e/2/c
+        F = 1 + (d**2)/(4*a) + (e**2)/(4*c)
+        a = np.sqrt(F/a)
+        b = np.sqrt(F/c)
+        long_axis = 2*max(a,b)
+        short_axis = 2*min(a,b)
+        
+        X0_in = X0*cos_phi - Y0*sin_phi
+        Y0_in = X0*sin_phi + Y0*cos_phi
+        
+        return [a,b,orientation_rad,X0,Y0,X0_in,Y0_in,
+                long_axis,short_axis,status]
+        
+    else:
+        print('Something went wrong')
+        return 0
+
+def fit_ellipse_nonlin_lstsq(x, y, plot_flag=0):
+
+    def residual(params, x, y):
+        xc, yc, a, b = params
+        return b**2*(x-xc)**2 + a**2*(y-yc)**2 - (a*b)**2
+    
+    def Jacobian(params, x, y):           
+        xc, yc, a, b = params
+        J         = np.zeros((x.shape[0],params.shape[0]))
+        J[:,0]    = -2*(x-xc)*b**2
+        J[:,1]    = -2*(y-yc)*a**2
+        J[:,2]    = -2*a*b**2
+        J[:,3]    = -2*b*a**2
+        return J
+    
+    # nonlinear least squares fit
+    r_guess = np.sqrt(x[0]**2 + y[0]**2)/2
+    params0 = np.array((x[0], y[0],r_guess,r_guess))  # use first data point as initial guess
+    params  = leastsq(residual, params0, args=(x,y), Dfun=Jacobian)[0]
+    xc, yc, a, b = params    
+    print('xc = '+'%11.8f'%xc, 'zc = '+'%11.8f'%yc, 
+          'a = '+'%11.8f'%a,   'b = '+'%11.8f'%b)
+   
+    if(plot_flag):
+        # plotting
+        t         = np.linspace(0,2*np.pi,num=10000)
+        xx        = xc + a*np.cos(t)
+        yy        = yc + b*np.sin(t)
+        plt.close('all')
+        plt.plot(x,  y,  'ok', ms=10)         # input data points
+        plt.plot(xx, yy, '-b', lw=2)          # nonlinear fit
+        plt.plot(xc, yc, 'or', ms=10)         # nonlinear fit center
+        plt.xlim([np.min(xx),np.max(xx)])
+        plt.ylim([np.min(yy),np.max(yy)])
+        plt.axes().set_aspect('equal')
+        plt.xlabel('x')
+        plt.ylabel('z')
+        plt.show()
+    
+    return xc, yc, a, b   
     
 """ 
 Thresholds image with threshold set to mean + n*standard_deviation
@@ -143,7 +255,7 @@ def radial_projection(img,center,r,num_r,theta,r_in,r_out,):
         # make sure we are in image
         if( (x1 < n) & (x2 < n) & (x1 > 0) & (x2 > 0) &
             (y1 < m) & (y2 < m) & (y1 > 0) & (y2 > 0) ):
-            if(x2-x1 == 0 & y2-y1 == 0):
+            if( ((x2-x1) == 0) & ((y2-y1) == 0) ):
                 r_project[ridx] = img[x1,y1]
             elif(x2-x1 == 0):
                 r_project[ridx] = img[x1,y1] + \
@@ -161,6 +273,128 @@ def radial_projection(img,center,r,num_r,theta,r_in,r_out,):
                 r_project[ridx] = np.dot(np.dot(a,Q),b)/((x2-x1)*(y2-y1))
 
     return r_project, r_domain
+    
+def line_normal_to_curve(x0,y0,distance):
+    """
+    Finds two points along line perpendicular to ellipse a distance from the
+    point on the ellipse at angle theta about the center. Returns slope and 
+    intercept of the line as well
+    inputs
+        x0          x-coordinates of three points
+        y0          y-coordinates of three points
+        distance    distance from point to find two points along line
+    outputs
+        x           coordinates of two points
+        y           coordinates of two points
+        slope       slope of line normal to ellipse at x0,y0
+        intercept   y-intercpet of the line normal to ellipse at x0,y0
+    """
+   
+    if( np.abs(y0[1]) > np.abs(x0[1])):
+        # Slope of line normal to ellipse at that point
+        b_diff = (y0[1]-y0[0])/(x0[1]-x0[0])
+        f_diff = (y0[2]-y0[1])/(x0[2]-x0[1])
+        slope  = -1/(0.5*b_diff + 0.5*f_diff)
+        intercept = -slope*x0[1] + y0[1]
+        
+        # Polynomial coefficients
+        p = [(1 + slope**2), 
+             (2*slope*(intercept - y0[1]) - 2*x0[1]), 
+             ((intercept - y0[1])**2 + x0[1]**2 - distance**2) ]  
+        
+        x = np.real(np.roots(p))
+        y = np.real(slope*x + intercept)
+    else:
+        # Slope of line normal to ellipse at that point
+        b_diff = (x0[1]-x0[0])/(y0[1]-y0[0])
+        f_diff = (x0[2]-x0[1])/(y0[2]-y0[1])
+        slope  = -1/(0.5*b_diff + 0.5*f_diff)
+        intercept = -slope*y0[1] + x0[1]
+        
+        # Polynomial coefficients
+        p = [(1 + slope**2), 
+             (2*slope*(intercept - x0[1]) - 2*y0[1]), 
+             ((intercept - x0[1])**2 + y0[1]**2 - distance**2) ] 
+       
+        y = np.roots(p)
+        x = slope*y + intercept
+    return x, y
+    
+
+def radial_projection_ellipse(img,xc,yc,a,b,orient,num_r,theta,distance):
+    """
+    Interpolates along a line in the radial direction
+    
+    inputs
+            img     image
+            center  center of the rings in the image
+            a,b     major/minor axis of ring of interest
+            orient  angle at which ellipse is oriented
+            num_r   number of points to sample along line
+            theta   angle of line (give three angles to identify center)
+            d_in    inside window containing ring
+            d_out   outside window containing ring]
+            
+    outputs
+            r_project  image values at points along line
+            r_domain   domain over which image values are defined
+    """
+    # Points centered at angle theta[1]
+ 
+    xi = a*np.cos(theta) + xc
+    yi = b*np.sin(theta) + yc
+    x0 =  xi*np.cos(orient) + yi*np.sin(orient)
+    y0 = -xi*np.sin(orient) + yi*np.cos(orient)
+
+    # Get endpoints of line perpendicular to ellipse at x0, y0
+    x_l, y_l = line_normal_to_curve(x0,y0,distance)
+
+    sort = (x_l-xc)**2 + (y_l-yc)**2
+    sort_ind = [np.argmin(sort), np.argmax(sort)]
+    x_line = x_l[sort_ind]
+    y_line = y_l[sort_ind]                       
+
+    if( x_line[1] == x_line[0]):
+        x_domain = x_line[0]*np.ones(2*distance)
+        y_domain = np.linspace(y_line[0],y_line[1],2*distance)
+    elif( y_line[1] == y_line[0]):
+        y_domain = y_line[0]*np.ones(2*distance)
+        x_domain = np.linspace(x_line[0],x_line[1],2*distance)
+    else:
+        x_domain = np.linspace(x_line[0],x_line[1],2*distance)
+        y_domain = np.linspace(y_line[0],y_line[1],2*distance)
+        
+    f = np.zeros(x_domain.shape)
+     
+    for idx in range(len(x_domain)):
+        
+        # identify surrounding four points
+        x = x_domain[idx]
+        y = y_domain[idx]    
+        x1 = np.floor( x )
+        x2 = np.ceil(  x )
+        y1 = np.floor( y )
+        y2 = np.ceil(  y )
+  
+        # make sure we are in image
+        n,m = img.shape
+        if( (x1 < n) & (x2 < n) & (x1 > 0) & (x2 > 0) &
+            (y1 < m) & (y2 < m) & (y1 > 0) & (y2 > 0) ):
+            if( ((x2-x1) == 0) & ((y2-y1) == 0) ):
+                f[idx] = img[y1,x1]
+            elif(x2-x1 == 0):
+                f[idx] = img[y1,x1] + (img[y2,x2]-img[y1,x1])*(y-y1)/(y2-y1)
+            elif(y2-y1 == 0):
+                f[idx] = img[y1,x1] + (img[y2,x2]-img[y1,x1])*(x-x1)/(x2-x1)
+            else: 
+                # interpolate
+                a = np.matrix([x2-x,x-x1])
+                Q = np.matrix([[img[y1,x1],img[y1,x2]],
+                              [img[y2,x1],img[y2,x2]]])      
+                b = np.matrix([[y2-y],[y-y1]])
+                f[idx] = np.dot(np.dot(a,Q),b)/((x2-x1)*(y2-y1))
+
+    return f, x_domain, y_domain
 
 def azimuthal_projection(img,center,r,theta_1,theta_2,num_theta):
     """
@@ -263,12 +497,12 @@ def find_scale_space_maxima(signal,sigma,C=4,octaves=4):
        plt.plot(filt_signal)
     return maxima
         
-def do_peak_fit(data,param,plot_flag=0):
-    amp_est                 = np.max(data)
-    fwhm_est                = len(data)/2.0
-    fit_domain              = np.arange(len(data))
-    peakCtr, loCut, hiCut   = DA.get_peak_fit_indices(data)
-    data_rm_back, back       = peak.RemoveBackground(fit_domain,data,loCut,hiCut)
+def do_peak_fit(y,index,param,plot_flag=0):
+    amp_est                 = np.max(y)
+    fwhm_est                = len(y)/2.0
+    fit_domain              = np.arange(len(y))
+    peakCtr, loCut, hiCut   = DA.get_peak_fit_indices(y)
+    data_rm_back, back       = peak.RemoveBackground(fit_domain,y,loCut,hiCut)
     _, param_opt, err       = peak.fitPeak(fit_domain, data_rm_back, peakCtr, 
                                        fwhm=fwhm_est, amp=amp_est,
                                        FitType='Gaussian', n=1)
@@ -278,15 +512,27 @@ def do_peak_fit(data,param,plot_flag=0):
     if(plot_flag):
         plt.close(1)
         plt.figure(1)
-        plt.plot(r_domain,data_rm_back,'o-b') 
+        plt.plot(y,'o-b') 
         x_fit = np.linspace(fit_domain[0],fit_domain[-1],500)
-        r_fit = np.linspace(r_domain[0],r_domain[-1],500)
-        plt.plot(r_fit,peak.gaussian(x_fit,param_opt),'-r')   
-        title = str(i) + '_err_' + str(err) + '_param_' + str(param)
+        plt.plot(x_fit,peak.gaussian(x_fit,param_opt)+np.mean(back),'-r')   
+        title = str(index) + '_err_' + str(err) + '_param_' + str(param)
         plt.title(title)
         plt.savefig(os.path.join('plots',title + '.png'))
 
     
     return mu, ((sigmaL+sigmaR)/2)**2, amp, err
     
-    
+def crop_around_max(x):
+     out = np.argmax(x)
+     center = round(out)
+     if( center < (len(x)-1-center) ):
+         x_crop = x[0:(2*center+2)]
+         indices = range(0,int(2*center+2))
+     elif( center > (len(x)-1-center) ):
+         x_crop = x[(2*center-(len(x)-1)):len(x)]
+         indices = range(int(2*center-(len(x)-1)),len(x))
+     else:
+         x_crop = np.copy(x)
+         indices = range(0,len(x))
+     
+     return x_crop, indices, center
