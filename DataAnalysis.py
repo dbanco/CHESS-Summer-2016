@@ -121,7 +121,7 @@ def get_peak_fit_indices(peak, ctr=0.5, lo=0.2, hi=0.8):
     
     peakCtr = int(round(len(peak)*ctr))
     loCut   = int(round(len(peak)*lo))
-    hiCut   = int(round(len(peak)*hi))
+    hiCut   = int(round((len(peak)-1)*hi))
     
     return peakCtr, loCut, hiCut
 

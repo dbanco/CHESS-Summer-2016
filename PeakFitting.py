@@ -121,9 +121,9 @@ def fitPeak(x, y, peakCtr, fwhm=10, amp=3000, FitType='Gaussian', n=1):
     
 def RemoveBackground(x, y, loCut, hiCut):
     
-    x_bg        = np.concatenate([ x[x<loCut], x[x>hiCut] ])
-    y_bg        = np.concatenate([ y[x<loCut], y[x>hiCut] ])
-    
+    x_bg        = np.concatenate([ x[x<=loCut], x[x>=hiCut] ])
+    y_bg        = np.concatenate([ y[x<=loCut], y[x>=hiCut] ])
+
     f           = interp1d(x_bg, y_bg)
     background  = f(x)
     
