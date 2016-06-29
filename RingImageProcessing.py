@@ -498,11 +498,16 @@ def find_scale_space_maxima(signal,sigma,C=4,octaves=4):
     return maxima
         
 def do_peak_fit(y,index=0,param=0,plot_flag=0):
+    """
+    inputs
+        y       a 1D vector containing a peak
+        index
+    """
     amp_est                 = np.max(y)
     fwhm_est                = len(y)/2.0
     fit_domain              = np.arange(len(y))
-    peakCtr, loCut, hiCut   = DA.get_peak_fit_indices(y)
-    data_rm_back, back       = peak.RemoveBackground(fit_domain,y,loCut,hiCut)
+    peakCtr, loCut, hiCut   = DA.get_peak_fit_indices(y,loCut=0.01,hiCut=0.99)
+    data_rm_back, back      = peak.RemoveBackground(fit_domain,y,loCut,hiCut)
     _, param_opt, err       = peak.fitPeak(fit_domain, data_rm_back, peakCtr, 
                                        fwhm=fwhm_est, amp=amp_est,
                                        FitType='Gaussian', n=1)
@@ -550,19 +555,60 @@ def two_stage_ring_fit(img,r_est,dr):
         xc-     x-coordinate of center of ellipse
         zc-     z-coordinate of center of ellipse
         rot-    orientation angle of ellipse
+        
+        
+    EX:
+    # Estimate radius of ring
+    plt.close('all')
+    plt.figure(1)
+    plt.imshow(img,cmap='jet',vmin=0,vmax=200)
+    xc = 1026
+    zc = 1018
+    radius_test = 606
+    plt.plot([xc,xc+radius_test],[zc,zc],'o-w')
+    
+    #%% Fit to three rings
+    plt.close('all')
+    plt.figure(1)
+    plt.imshow(img,cmap='jet',vmin=0,vmax=200)
+    
+    radius = 370
+    dr     = 30
+    a,b,xc,zc,rot = RingIP.two_stage_ring_fit(img,radius,dr)
+    # Need to be able to view fit and points used at each stage
+    
+    # View fitted ellipse
+    t   = np.linspace(0,2*np.pi,num=10000)
+    xxa = xc + a*np.cos(t)
+    zza = zc + b*np.sin(t)
+    xx  =  xxa*np.cos(rot) + zza*np.sin(rot)
+    zz  = -xxa*np.sin(rot) + zza*np.cos(rot)
+    xcent =  xc*np.cos(rot) + zc*np.sin(rot)
+    zcent = -xc*np.sin(rot) + zc*np.cos(rot)
+    
+    plt.plot(xx,zz,'-w')
+    plt.plot(xcent,zcent,'wo')
+    
+    plt.xlim([np.min(xx)-10, np.max(xx)+10])
+    plt.ylim([np.min(zz)-10, np.max(zz)+10])
+    #plt.title('a = ' + str(a) + ', b = ' + str(b))
     """
     
     r_in = r_est - dr
     r_out = r_est + dr
-    # Thresholds image with threshold 3 standard deviations above the mean
-    thresh_img = n_std_threshold(img,3)
+
     # Keeps only pixels near ring
-    bin_img = distance_threshold(img,r_in,r_out)
+    bin_img = distance_threshold(img,r_in,r_out)    
+    
+    # Thresholds remainder of image with threshold 
+    # 2 standard deviations above the mean
+    thresh_img = n_std_threshold(img*bin_img,1)
+
     # Converts identified pixels to a set of x,z,f data points
     x,z,f = get_points(img,bin_img*thresh_img)
 
     # Fit ellipse to found points (ignores intensity)
-    out1 = RingIP.fit_ellipse_lstsq(x,z)
+    out1 = fit_ellipse_lstsq(x,z)
     a1 = out1[0]
     b1 = out1[1]
     rot1 = out1[2]
@@ -589,12 +635,17 @@ def two_stage_ring_fit(img,r_est,dr):
                                                     [theta[i-1],theta[i],
                                                     theta[i+1]],dr)
         # Crop segment so peak is at the center                                                    
-        f_crop, crop_ind, _= crop_around_max(f)
+        f_crop, crop_ind, _ = crop_around_max(f)
+        
         x_dom_crop = x_dom[crop_ind]
         y_dom_crop = y_dom[crop_ind]
         
-        # Fit peaks in cropped segments
-        mu[i],_,_,err[i] = RingIP.do_peak_fit(f_crop)
+        # Fit peaks in cropped segments if cropped segment is long enough
+        if (len(f_crop) > 0.2*len(f)):
+            mu[i],_,_,err[i] = do_peak_fit(f_crop)
+        else:
+            mu[i] = 0
+            err[i] = 1
         
         # Keep only peak fits within error threshold
         if(err[i]<0.2):
@@ -604,7 +655,7 @@ def two_stage_ring_fit(img,r_est,dr):
             z2 = np.append(z2,ymid)
     
     # Fit ellipse to the top of the peaks
-    out2 = RingIP.fit_ellipse_lstsq(x2,z2)
+    out2 = fit_ellipse_lstsq(x2,z2)
     a2 = out2[0]
     b2 = out2[1]
     rot2 = out2[2]
