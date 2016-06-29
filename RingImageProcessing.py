@@ -215,8 +215,8 @@ def get_points(img,bin_img):
             y    y coordinate of pixels
             f    value of pixels
     """
-    x,y = np.nonzero(bin_img)
-    f = img[x,y]
+    y,x = np.nonzero(bin_img)
+    f = img[y,x]
     return x,y,f
 
 
@@ -497,7 +497,7 @@ def find_scale_space_maxima(signal,sigma,C=4,octaves=4):
        plt.plot(filt_signal)
     return maxima
         
-def do_peak_fit(y,index=0,param=0,plot_flag=0):
+def do_peak_fit(y,edgeCut,index=0,param=0,plot_flag=0):
     """
     inputs
         y       a 1D vector containing a peak
@@ -506,7 +506,7 @@ def do_peak_fit(y,index=0,param=0,plot_flag=0):
     amp_est                 = np.max(y)
     fwhm_est                = len(y)/2.0
     fit_domain              = np.arange(len(y))
-    peakCtr, loCut, hiCut   = DA.get_peak_fit_indices(y,lo=0.01,hi=0.99)
+    peakCtr, loCut, hiCut   = DA.get_peak_fit_indices(y,lo=edgeCut,hi=1-edgeCut)
     data_rm_back, back      = peak.RemoveBackground(fit_domain,y,loCut,hiCut)
     _, param_opt, err       = peak.fitPeak(fit_domain, data_rm_back, peakCtr, 
                                        fwhm=fwhm_est, amp=amp_est,
@@ -542,7 +542,8 @@ def crop_around_max(x):
      
      return x_crop, indices, center
      
-def two_stage_ring_fit(img,r_est,dr):
+     
+def one_stage_ring_fit(img,r_est,dr,pf1=False):
     """  
     Fits an ellipse to a ring of an xray diffraction image 
     inputs
@@ -575,24 +576,88 @@ def two_stage_ring_fit(img,r_est,dr):
     radius = 370
     dr     = 30
     a,b,xc,zc,rot = RingIP.two_stage_ring_fit(img,radius,dr)
-    # Need to be able to view fit and points used at each stage
+
+    """  
+    if(pf1):
+        plt.close(1)
+        plt.figure(1)
+        plt.imshow(img,cmap='jet',vmin=0,vmax=200)
     
-    # View fitted ellipse
-    t   = np.linspace(0,2*np.pi,num=10000)
-    xxa = xc + a*np.cos(t)
-    zza = zc + b*np.sin(t)
-    xx  =  xxa*np.cos(rot) + zza*np.sin(rot)
-    zz  = -xxa*np.sin(rot) + zza*np.cos(rot)
-    xcent =  xc*np.cos(rot) + zc*np.sin(rot)
-    zcent = -xc*np.sin(rot) + zc*np.cos(rot)
+    r_in = r_est - dr
+    r_out = r_est + dr
+
+    # Keeps only pixels near ring
+    bin_img = distance_threshold(img,r_in,r_out)    
     
-    plt.plot(xx,zz,'-w')
-    plt.plot(xcent,zcent,'wo')
+    # Thresholds remainder of image with threshold 
+    # 2 standard deviations above the mean
+    thresh_img = n_std_threshold(img*bin_img,1)
+
+    # Converts identified pixels to a set of x,z,f data points
+    x,z,f = get_points(img,bin_img*thresh_img)
+
+    # Fit ellipse to found points (ignores intensity)
+    out = fit_ellipse_lstsq(x,z)
+    a = out[0]
+    b = out[1]
+    rot = out[2]
+    xc = out[3]
+    zc = out[4]
+
+    if(pf1):
+        plt.figure(2)
+        plt.plot(x,z,'wx')
+        xx,zz = gen_ellipse(a,b,xc,zc,rot)
+        plt.plot(xx,zz,'w-')
+        plt.xlim([np.min(xx)-10, np.max(xx)+10])
+        plt.ylim([np.min(zz)-10, np.max(zz)+10])
+
+    return a, b, xc, zc, rot     
+     
+def two_stage_ring_fit(img,edgeCut,r_est,dr,pf1=False,pf2=False):
+    """  
+    Fits an ellipse to a ring of an xray diffraction image 
+    inputs
+        img-    image of xray diffraction rings    
+        edgeCut-edge cutoff for peak fitting (fraction of vector length)
+        r_est-  estimate of radius of ring of interest in pixels
+        dr-     space around ring on either side in pixels
+        pf1-    plots output of 2nd stage in figure(pf1)
+        pf2-    plots output of 1st stage in figure(pf2)
+    outputs
+        a-      x-axis radius parameter of fitted ellipse     
+        b-      z-axis radius parameter of fitted ellipse
+        xc-     x-coordinate of center of ellipse
+        zc-     z-coordinate of center of ellipse
+        rot-    orientation angle of ellipse
+        
+        
+    EX:
+    # Estimate radius of ring
+    plt.close('all')
+    plt.figure(1)
+    plt.imshow(img,cmap='jet',vmin=0,vmax=200)
+    xc = 1026
+    zc = 1018
+    radius_test = 606
+    plt.plot([xc,xc+radius_test],[zc,zc],'o-w')
     
-    plt.xlim([np.min(xx)-10, np.max(xx)+10])
-    plt.ylim([np.min(zz)-10, np.max(zz)+10])
-    #plt.title('a = ' + str(a) + ', b = ' + str(b))
-    """
+    # Fit ring
+    edgeCut = 0.2
+    radius = 370
+    dr     = 30
+    a,b,xc,zc,rot = RingIP.two_stage_ring_fit(img,edgeCut,radius,dr)
+
+    """  
+    if(pf1):
+        plt.close(pf1)
+        plt.figure(pf1)
+        plt.imshow(img,cmap='jet',vmin=0,vmax=200)
+        
+    if(pf2):
+        plt.close(pf2)
+        plt.figure(pf2)
+        plt.imshow(img,cmap='jet',vmin=0,vmax=200)
     
     r_in = r_est - dr
     r_out = r_est + dr
@@ -614,6 +679,14 @@ def two_stage_ring_fit(img,r_est,dr):
     rot1 = out1[2]
     xc1 = out1[3]
     zc1 = out1[4]
+
+    if(pf2):
+        plt.figure(pf2)
+        plt.plot(x,z,'wx')
+        xx,zz = gen_ellipse(a1,b1,xc1,zc1,rot1)
+        plt.plot(xx,zz,'w-')
+        plt.xlim([np.min(xx)-10, np.max(xx)+10])
+        plt.ylim([np.min(zz)-10, np.max(zz)+10])
 
     # Identify approximate number of significant samples to interpolate
     num_r = round(r_out-r_in)
@@ -642,7 +715,7 @@ def two_stage_ring_fit(img,r_est,dr):
         
         # Fit peaks in cropped segments if cropped segment is long enough
         if (len(f_crop) > 0.2*len(f)):
-            mu[i],_,_,err[i] = do_peak_fit(f_crop)
+            mu[i],_,_,err[i] = do_peak_fit(f_crop,edgeCut)
         else:
             mu[i] = 0
             err[i] = 1
@@ -653,6 +726,15 @@ def two_stage_ring_fit(img,r_est,dr):
             ymid = y_dom_crop[int(round(mu[i]))]
             x2 = np.append(x2,xmid)
             z2 = np.append(z2,ymid)
+            
+            if(pf1):
+                x1p  = x_dom_crop[0]
+                x2p  = x_dom_crop[-1]
+                y1p  = y_dom_crop[0]
+                y2p  = y_dom_crop[-1]
+                plt.figure(pf1)
+                plt.plot((x1p,xmid,x2p),(y1p,ymid,y2p),'o-w')
+
     
     # Fit ellipse to the top of the peaks
     out2 = fit_ellipse_lstsq(x2,z2)
@@ -662,4 +744,21 @@ def two_stage_ring_fit(img,r_est,dr):
     xc2 = out2[3]
     zc2 = out2[4]
 
+    if(pf1):
+        plt.figure(pf1)
+        xx,zz = gen_ellipse(a1,b1,xc1,zc1,rot1)
+        plt.plot(xx,zz,'w-')
+        plt.xlim([np.min(xx)-10, np.max(xx)+10])
+        plt.ylim([np.min(zz)-10, np.max(zz)+10])
     return a2, b2, xc2, zc2, rot2
+
+def gen_ellipse(a,b,xc,yc,rot):
+    """
+    Generate x,y data points for plotting an ellipse
+    """
+    t         = np.linspace(0,2*np.pi,num=10000)
+    xa        = xc + a*np.cos(t)
+    ya        = yc + b*np.sin(t)
+    x  =  (xa)*np.cos(rot) + (ya)*np.sin(rot)
+    y  = -(xa)*np.sin(rot) + (ya)*np.cos(rot) 
+    return x,y
