@@ -497,7 +497,7 @@ def find_scale_space_maxima(signal,sigma,C=4,octaves=4):
        plt.plot(filt_signal)
     return maxima
         
-def do_peak_fit(y,index,param,plot_flag=0):
+def do_peak_fit(y,index=0,param=0,plot_flag=0):
     amp_est                 = np.max(y)
     fwhm_est                = len(y)/2.0
     fit_domain              = np.arange(len(y))
@@ -536,3 +536,79 @@ def crop_around_max(x):
          indices = range(0,len(x))
      
      return x_crop, indices, center
+     
+def two_stage_ring_fit(img,r_est,dr):
+    """  
+    Fits an ellipse to a ring of an xray diffraction image 
+    inputs
+        img-    image of xray diffraction rings    
+        r_est-  estimate of radius of ring of interest in pixels
+        dr-     space around ring on either side in pixels
+    outputs
+        a-      x-axis radius parameter of fitted ellipse     
+        b-      z-axis radius parameter of fitted ellipse
+        xc-     x-coordinate of center of ellipse
+        zc-     z-coordinate of center of ellipse
+        rot-    orientation angle of ellipse
+    """
+    
+    r_in = r_est - dr
+    r_out = r_est + dr
+    # Thresholds image with threshold 3 standard deviations above the mean
+    thresh_img = n_std_threshold(img,3)
+    # Keeps only pixels near ring
+    bin_img = distance_threshold(img,r_in,r_out)
+    # Converts identified pixels to a set of x,z,f data points
+    x,z,f = get_points(img,bin_img*thresh_img)
+
+    # Fit ellipse to found points (ignores intensity)
+    out1 = RingIP.fit_ellipse_lstsq(x,z)
+    a1 = out1[0]
+    b1 = out1[1]
+    rot1 = out1[2]
+    xc1 = out1[3]
+    zc1 = out1[4]
+
+    # Identify approximate number of significant samples to interpolate
+    num_r = round(r_out-r_in)
+    # Identify smallest possible angular interval dtheta
+    r1 = np.mean(np.array([a1,b1]))
+    dtheta = np.abs(np.pi/4 - np.arctan((r1+1)/(r1-1)))
+    # Might include integer number of steps as an input parameter
+    step = 20*dtheta
+    theta = np.arange(dtheta,2*np.pi + step,step)
+    
+    mu = np.zeros(theta.shape)
+    err = np.zeros(theta.shape)
+    x2 = np.array([])
+    z2 = np.array([])
+    for i in range(len(theta)-1):
+        # Get points along line normal to ellipse at angle theta[i]
+        f, x_dom, y_dom = radial_projection_ellipse(img,xc1,zc1, 
+                                                    a1,b1,rot1,num_r,
+                                                    [theta[i-1],theta[i],
+                                                    theta[i+1]],dr)
+        # Crop segment so peak is at the center                                                    
+        f_crop, crop_ind, _= crop_around_max(f)
+        x_dom_crop = x_dom[crop_ind]
+        y_dom_crop = y_dom[crop_ind]
+        
+        # Fit peaks in cropped segments
+        mu[i],_,_,err[i] = RingIP.do_peak_fit(f_crop)
+        
+        # Keep only peak fits within error threshold
+        if(err[i]<0.2):
+            xmid = x_dom_crop[int(round(mu[i]))]
+            ymid = y_dom_crop[int(round(mu[i]))]
+            x2 = np.append(x2,xmid)
+            z2 = np.append(z2,ymid)
+    
+    # Fit ellipse to the top of the peaks
+    out2 = RingIP.fit_ellipse_lstsq(x2,z2)
+    a2 = out2[0]
+    b2 = out2[1]
+    rot2 = out2[2]
+    xc2 = out2[3]
+    zc2 = out2[4]
+
+    return a2, b2, xc2, zc2, rot2
