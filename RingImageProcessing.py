@@ -506,7 +506,7 @@ def do_peak_fit(y,index=0,param=0,plot_flag=0):
     amp_est                 = np.max(y)
     fwhm_est                = len(y)/2.0
     fit_domain              = np.arange(len(y))
-    peakCtr, loCut, hiCut   = DA.get_peak_fit_indices(y,loCut=0.01,hiCut=0.99)
+    peakCtr, loCut, hiCut   = DA.get_peak_fit_indices(y,lo=0.01,hi=0.99)
     data_rm_back, back      = peak.RemoveBackground(fit_domain,y,loCut,hiCut)
     _, param_opt, err       = peak.fitPeak(fit_domain, data_rm_back, peakCtr, 
                                        fwhm=fwhm_est, amp=amp_est,
