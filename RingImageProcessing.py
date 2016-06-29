@@ -579,8 +579,8 @@ def one_stage_ring_fit(img,r_est,dr,pf1=False):
 
     """  
     if(pf1):
-        plt.close(1)
-        plt.figure(1)
+        plt.close(pf1)
+        plt.figure(pf1)
         plt.imshow(img,cmap='jet',vmin=0,vmax=200)
     
     r_in = r_est - dr
@@ -605,7 +605,7 @@ def one_stage_ring_fit(img,r_est,dr,pf1=False):
     zc = out[4]
 
     if(pf1):
-        plt.figure(2)
+        plt.figure(pf1)
         plt.plot(x,z,'wx')
         xx,zz = gen_ellipse(a,b,xc,zc,rot)
         plt.plot(xx,zz,'w-')
