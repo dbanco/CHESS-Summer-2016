@@ -5,19 +5,26 @@ Created on Sat Jun 11 16:08:40 2016
 """
 import numpy as np
 from scipy.optimize import leastsq
-from scipy.ndimage.measurements import center_of_mass as com
 import matplotlib.pyplot as plt
 from scipy.signal import argrelmax
 import DataAnalysis as DA
 import PeakFitting as peak
 import os
-"""
-#### User Inputs (edge of circle coordinates) ####
-x  = np.array([ 5.949, 5.699, 4.599, 3.25, 5.299 ])
-y  = np.array([-2.0  , 0.0  , 2.0  , 3.0,  1.0   ])
-"""
+
 
 def fit_circle_nonlin_lstsq(x, y, plot_flag=0):
+    """
+    Fits circle to data points
+    inputs
+            x           x-coordinates of points to fit
+            y           y-coordinates of points to fit
+            plot_flag   plots circle of true
+            
+    outputs
+            xc          x-coordinate of center of circle
+            yc          y-coordinate of center of circle
+            r           radius of circle
+    """
 
     def residual(params, x, y):
         xc, yc, r = params
@@ -57,6 +64,22 @@ def fit_circle_nonlin_lstsq(x, y, plot_flag=0):
     return xc, yc, r
 
 def fit_ellipse_lstsq(x,y):
+    """
+    Fits ellipse to data points
+    inputs
+            x           x-coordinates of points to fit
+            y           y-coordinates of points to fit
+            plot_flag   plots circle of true
+            
+    outputs
+            a           x-axis radius parameter
+            b           y-axis radius parameter
+            orient      orientation angle of the ellipse
+            X0_in       x-coordinate of center of ellipse
+            Y0_in       y-coordinate of center of ellipse
+            X0          x-coordinate of center of ellipse before rotation
+            Y0          y-coordinate of center of ellipse before rotation
+    """
     orientation_tol = 1e-3
     mean_x = np.mean(x)
     mean_y = np.mean(y)
@@ -110,21 +133,32 @@ def fit_ellipse_lstsq(x,y):
         F = 1 + (d**2)/(4*a) + (e**2)/(4*c)
         a = np.sqrt(F/a)
         b = np.sqrt(F/c)
-        long_axis = 2*max(a,b)
-        short_axis = 2*min(a,b)
-        
+#        long_axis = 2*max(a,b)
+#        short_axis = 2*min(a,b)
+        # Need to apply rotation to center point to get actual center
         X0_in = X0*cos_phi - Y0*sin_phi
         Y0_in = X0*sin_phi + Y0*cos_phi
         
-        return [a,b,orientation_rad,X0,Y0,X0_in,Y0_in,
-                long_axis,short_axis,status]
+        return [a,b,orientation_rad,X0_in,Y0_in,X0,Y0]
         
     else:
         print('Something went wrong')
         return 0
 
 def fit_ellipse_nonlin_lstsq(x, y, plot_flag=0):
-
+    """
+    Fits ellipse to data points
+    inputs
+            x           x-coordinates of points to fit
+            y           y-coordinates of points to fit
+            plot_flag   plots circle of true
+            
+    outputs
+            xc          x-coordinate of center of ellipse
+            yc          y-coordinate of center of ellipse
+            a           x-axis radius parameter
+            b           y-axis radius parameter
+    """
     def residual(params, x, y):
         xc, yc, a, b = params
         return b**2*(x-xc)**2 + a**2*(y-yc)**2 - (a*b)**2
@@ -164,18 +198,14 @@ def fit_ellipse_nonlin_lstsq(x, y, plot_flag=0):
     
     return xc, yc, a, b   
     
-""" 
-Thresholds image with threshold set to mean + n*standard_deviation
 
-Thresholding with n = 3 is good for isolating points on a ring to which to fit 
-circle
-"""
 def n_std_threshold(img,n):
     """
-    inputs: img-           image
-            n-             constant (threshold = mu + n*sigma)
+    Thresholds image with threshold set to mean + n*standard_deviation
+    inputs: img           image
+            n             constant (threshold = mu + n*sigma)
             
-    outputs: thresh_img-   binary image
+    outputs: thresh_img   binary image    
     """
     mu = np.mean(img.flatten())
     sigma = np.std(img.flatten())
@@ -184,10 +214,19 @@ def n_std_threshold(img,n):
 
     return img > thresh_low
     
-""" 
-Creates binary image by thresholding pixel distance from given center
-"""
+
 def distance_threshold(img,radius_low,radius_high,center=0):
+    """ 
+    Creates binary image by thresholding pixel distance from given center
+    inputs
+            img             image to be thresholded by pixel distance
+            radius_low      distance above which pixels are kept 
+            radius_high     distance below which pixels are kept
+            center          [x,y] position from which distance is measured
+    outputs
+            bin_img         binary image where pixels equal to 1 satisfy
+                            radius_low < distance < radius_high
+    """
     bin_img = np.zeros(img.shape)
     n,m = img.shape
     if(center == 0):
@@ -207,13 +246,13 @@ def get_points(img,bin_img):
     """
     Gets coordinates and values of img from true values in binary image
     inputs
-            img an image
-            bin_img a binary image
+            img         an image
+            bin_img     a binary image
             
     outputs
-            x    x coordinate of pixels
-            y    y coordinate of pixels
-            f    value of pixels
+            x           x coordinate of pixels
+            y           y coordinate of pixels
+            f           value of pixels
     """
     y,x = np.nonzero(bin_img)
     f = img[y,x]
@@ -499,9 +538,22 @@ def find_scale_space_maxima(signal,sigma,C=4,octaves=4):
         
 def do_peak_fit(y,edgeCut,index=0,param=0,plot_flag=0):
     """
+    Fits peak with two-sided Gaussian. Assumes peak is in the center and that
+    edgeCut tells which portion of y to treat as background. interpolates
+    between the points at the cutoff to subtract background before fitting
+    a peak.
+    
     inputs
-        y       a 1D vector containing a peak
-        index
+            y           a 1D vector containing a peak
+            edgeCut     fraction at edge of y to treat as background
+            index       used to identify plot, appears in title
+            param       used to identify plot, appears in title
+            plot_flag   produces and saves plot to "plots" directory
+    outputs
+            mu          mean of the fitted two-sided Gaussian
+            variance    total variance of the two-sided Gaussian
+            amp         amplitude of the two-sided Gaussian
+            err         ||fit - y||/||y||
     """
     amp_est                 = np.max(y)
     fwhm_est                = len(y)/2.0
@@ -528,22 +580,31 @@ def do_peak_fit(y,edgeCut,index=0,param=0,plot_flag=0):
     return mu, ((sigmaL+sigmaR)/2)**2, amp, err
     
 def crop_around_max(x):
-     out = np.argmax(x)
-     center = round(out)
-     if( center < (len(x)-1-center) ):
-         x_crop = x[0:(2*center+2)]
-         indices = range(0,int(2*center+2))
-     elif( center > (len(x)-1-center) ):
-         x_crop = x[(2*center-(len(x)-1)):len(x)]
-         indices = range(int(2*center-(len(x)-1)),len(x))
-     else:
-         x_crop = np.copy(x)
-         indices = range(0,len(x))
+    """
+    Finds max of vector and crops segment so max is at center
+    inputs
+            x           a 1D numpy array
+    outputs
+            x_cropped   cropped 1D numpy array
+            indices     indices such that x_cropped = x[indices]
+            center      index where center is located in x
+    """
+    out = np.argmax(x)
+    center = round(out)
+    if( center < (len(x)-1-center) ):
+    x_crop = x[0:(2*center+2)]
+    indices = range(0,int(2*center+2))
+    elif( center > (len(x)-1-center) ):
+    x_crop = x[(2*center-(len(x)-1)):len(x)]
+    indices = range(int(2*center-(len(x)-1)),len(x))
+    else:
+    x_crop = np.copy(x)
+    indices = range(0,len(x))
      
-     return x_crop, indices, center
+    return x_crop, indices, center
      
      
-def one_stage_ring_fit(img,r_est,dr,pf1=False):
+def ring_fit(img,r_est,dr,pf1=False):
     """  
     Fits an ellipse to a ring of an xray diffraction image 
     inputs
@@ -568,14 +629,10 @@ def one_stage_ring_fit(img,r_est,dr,pf1=False):
     radius_test = 606
     plt.plot([xc,xc+radius_test],[zc,zc],'o-w')
     
-    #%% Fit to three rings
-    plt.close('all')
-    plt.figure(1)
-    plt.imshow(img,cmap='jet',vmin=0,vmax=200)
-    
+    # Fit ring
     radius = 370
     dr     = 30
-    a,b,xc,zc,rot = RingIP.two_stage_ring_fit(img,radius,dr)
+    a,b,xc,zc,rot = RingIP.ring_fit(img,radius,dr)
 
     """  
     if(pf1):
@@ -754,7 +811,17 @@ def two_stage_ring_fit(img,edgeCut,r_est,dr,pf1=False,pf2=False):
 
 def gen_ellipse(a,b,xc,yc,rot):
     """
-    Generate x,y data points for plotting an ellipse
+    Generates x,y data points along the perimeter of ellipse defined by inputs
+    inputs            
+            a-      x-axis radius parameter of fitted ellipse     
+            b-      z-axis radius parameter of fitted ellipse
+            xc-     x-coordinate of center of ellipse
+            zc-     z-coordinate of center of ellipse
+            rot-    orientation angle of ellipse
+    
+    outputs
+            x       x-coordinates of points on ellipse
+            y       y-coordinates of points on ellipse
     """
     t         = np.linspace(0,2*np.pi,num=10000)
     xa        = xc + a*np.cos(t)
