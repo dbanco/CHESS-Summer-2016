@@ -592,14 +592,14 @@ def crop_around_max(x):
     out = np.argmax(x)
     center = round(out)
     if( center < (len(x)-1-center) ):
-    x_crop = x[0:(2*center+2)]
-    indices = range(0,int(2*center+2))
+        x_crop = x[0:(2*center+2)]
+        indices = range(0,int(2*center+2))
     elif( center > (len(x)-1-center) ):
-    x_crop = x[(2*center-(len(x)-1)):len(x)]
-    indices = range(int(2*center-(len(x)-1)),len(x))
+        x_crop = x[(2*center-(len(x)-1)):len(x)]
+        indices = range(int(2*center-(len(x)-1)),len(x))
     else:
-    x_crop = np.copy(x)
-    indices = range(0,len(x))
+        x_crop = np.copy(x)
+        indices = range(0,len(x))
      
     return x_crop, indices, center
      
