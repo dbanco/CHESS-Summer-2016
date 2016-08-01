@@ -261,7 +261,7 @@ def ellipse_basis(pos,a,b,theta,numt,tskip,ssq_perp,ssq_prll):
             B[posidx,tidx] = np.exp(-(dsq_perp/ssq_perp + dsq_prll/ssq_prll))
             
     return B, x0, y0
-    
+
 """
 #%% Test Gaussian on ellipse basis
 
@@ -290,3 +290,31 @@ plt.contourf(x,y,np.sum(B,axis=2))
 # Overlay the points on the elipse just to make sure we are OK
 plt.plot(xe,ye,'x')
 """
+
+
+def gaussian_basis(num_x,dx,r,mean,variance):
+    """
+    inputs:
+            num_x      number of data points
+            dx         distance between data points
+            mean       mean of gaussian function
+            variance   variance of gaussian function
+       
+    outputs:
+            B           basis vector
+    """
+    
+    idx = np.arange(0,num_x)
+    opposite = (idx[mean-np.floor(num_x/2)] + idx[mean-np.ceil(num_x/2)])/2
+    dist1 = np.abs(mean - idx)
+    dist2 = num_x/2 - np.abs(opposite - idx)
+    dist = np.minimum(dist1,dist2)*dx*r
+    # This distance may need to be multipled by dtheta to units of theta 
+    
+    # Square the distance
+    dist_sq = dist**2
+    
+    # Build basis vector
+    B = np.exp(-dist_sq/variance)
+            
+    return B

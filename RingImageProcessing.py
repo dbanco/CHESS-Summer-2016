@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import argrelmax
 import DataAnalysis as DA
 import PeakFitting as peak
+import EllipticModels as EM
 import os
 
 
@@ -69,16 +70,16 @@ def fit_ellipse_lstsq(x,y):
     inputs
             x           x-coordinates of points to fit
             y           y-coordinates of points to fit
-            plot_flag   plots circle of true
             
     outputs
             a           x-axis radius parameter
             b           y-axis radius parameter
             orient      orientation angle of the ellipse
-            X0_in       x-coordinate of center of ellipse
-            Y0_in       y-coordinate of center of ellipse
             X0          x-coordinate of center of ellipse before rotation
             Y0          y-coordinate of center of ellipse before rotation
+            X0_in       x-coordinate of center of ellipse after rotation
+            Y0_in       y-coordinate of center of ellipse after rotation
+
     """
     orientation_tol = 1e-3
     mean_x = np.mean(x)
@@ -139,11 +140,62 @@ def fit_ellipse_lstsq(x,y):
         X0_in = X0*cos_phi - Y0*sin_phi
         Y0_in = X0*sin_phi + Y0*cos_phi
         
-        return [a,b,orientation_rad,X0_in,Y0_in,X0,Y0]
+        return [a,b,orientation_rad,X0,Y0,X0_in,Y0_in]
         
     else:
         print('Something went wrong')
         return 0
+
+def fit_ellipse_at_center_nonlin_lstsq(x, y, xc, yc, plot_flag=0):
+    """
+    Fits ellipse to data points
+    inputs
+            x           x-coordinates of points to fit
+            y           y-coordinates of points to fit
+            xc          x-coordinate of center of ellipse
+            yc          y-coordinate of center of ellipse
+            plot_flag   plots circle of true
+            
+    outputs
+            a           x-axis radius parameter
+            b           y-axis radius parameter
+    """
+    def residual(params, x, y, xc, yc):
+        a, b = params
+        return b**2*(x-xc)**2 + a**2*(y-yc)**2 - (a*b)**2
+    
+    def Jacobian(params, x, y, xc, yc):           
+        a, b = params
+        J         = np.zeros((x.shape[0],params.shape[0]))
+        J[:,0]    = -2*a*b**2 + a*(y-yc)**2
+        J[:,1]    = -2*b*a**2 + b*(x-xc)**2
+        return J
+    
+    # nonlinear least squares fit
+    r_guess = np.sqrt(x[0]**2 + y[0]**2)/2
+    params0 = np.array((r_guess,r_guess))  # use first data point as initial guess
+    params  = leastsq(residual, params0, args=(x,y,xc,yc), Dfun=Jacobian)[0]
+    a, b = params    
+    print('a = '+'%11.8f'%a,   'b = '+'%11.8f'%b)
+   
+    if(plot_flag):
+        # plotting
+        t         = np.linspace(0,2*np.pi,num=10000)
+        xx        = xc + a*np.cos(t)
+        yy        = yc + b*np.sin(t)
+        plt.close('all')
+        plt.plot(x,  y,  'ok', ms=10)         # input data points
+        plt.plot(xx, yy, '-b', lw=2)          # nonlinear fit
+        plt.plot(xc, yc, 'or', ms=10)         # center
+        plt.xlim([np.min(xx),np.max(xx)])
+        plt.ylim([np.min(yy),np.max(yy)])
+        plt.axes().set_aspect('equal')
+        plt.xlabel('x')
+        plt.ylabel('y')
+        plt.show()
+    
+    return a, b
+    
 
 def fit_ellipse_nonlin_lstsq(x, y, plot_flag=0):
     """
@@ -168,8 +220,8 @@ def fit_ellipse_nonlin_lstsq(x, y, plot_flag=0):
         J         = np.zeros((x.shape[0],params.shape[0]))
         J[:,0]    = -2*(x-xc)*b**2
         J[:,1]    = -2*(y-yc)*a**2
-        J[:,2]    = -2*a*b**2
-        J[:,3]    = -2*b*a**2
+        J[:,2]    = -2*a*b**2 + a*(y-yc)**2
+        J[:,3]    = -2*b*a**2 + b*(x-xc)**2
         return J
     
     # nonlinear least squares fit
@@ -196,8 +248,7 @@ def fit_ellipse_nonlin_lstsq(x, y, plot_flag=0):
         plt.ylabel('z')
         plt.show()
     
-    return xc, yc, a, b   
-    
+    return a, b, xc, yc
 
 def n_std_threshold(img,n):
     """
@@ -222,7 +273,7 @@ def distance_threshold(img,radius_low,radius_high,center=0):
             img             image to be thresholded by pixel distance
             radius_low      distance above which pixels are kept 
             radius_high     distance below which pixels are kept
-            center          [x,y] position from which distance is measured
+            center          [row,col] position from which distance is measured
     outputs
             bin_img         binary image where pixels equal to 1 satisfy
                             radius_low < distance < radius_high
@@ -239,7 +290,7 @@ def distance_threshold(img,radius_low,radius_high,center=0):
             if ((pos > (radius_low)**2) & (pos < (radius_high)**2)):
                 bin_img[i,j] = 1                         
     
-    return bin_img
+    return bin_img == 1
 
 
 def get_points(img,bin_img):
@@ -470,24 +521,84 @@ def azimuthal_projection(img,center,r,theta_1,theta_2,num_theta):
         if( (x1 < n) & (x2 < n) & (x1 > 0) & (x2 > 0) &
             (y1 < m) & (y2 < m) & (y1 > 0) & (y2 > 0) ):
             if((x2-x1 == 0) & (y2-y1 == 0)):
-                theta_project[tidx] = img[x1,y1]
+                theta_project[tidx] = img[y1,x1]
             elif((x2-x1) == 0):
-                theta_project[tidx] = img[x1,y1] + \
-                                (img[x2,y2]-img[x1,y1])*(y-y1)/(y2-y1)
+                theta_project[tidx] = img[y1,x1] + \
+                                (img[y2,x2]-img[y1,x1])*(y-y1)/(y2-y1)
             elif((y2-y1) == 0):
                 theta_project[tidx] = img[x1,y1] + \
-                                (img[x2,y2]-img[x1,y1])*(x-x1)/(x2-x1)
+                                (img[y2,x2]-img[y1,x1])*(x-x1)/(x2-x1)
             else:
                 
                 # interpolate
                 a = np.matrix([x2-x,x-x1])
-                Q = np.matrix([[img[x1,y1],img[x1,y2]],
-                              [img[x2,y1],img[x2,y2]]])      
+                Q = np.matrix([[img[y1,x1],img[y1,x2]],
+                              [img[y2,x1],img[y2,x2]]])      
                 b = np.matrix([[y2-y],[y-y1]])
                 theta_project[tidx] = np.dot(np.dot(a,Q),b)/((x2-x1)*(y2-y1))
 
     return theta_project, theta_domain
+
+
+def azimuthal_projection_ellipse(img,center,a,b,rot,theta_1,theta_2,num_theta):
+    """
+    Interpolates along a line in the radial direction
     
+    inputs
+            img         image
+            center      center of the rings in the image
+            a           x-axis radius parameter of ellipse
+            b           y-axis radius parameter of ellipse     
+            rot         orientation of ellipse
+            theta_1     inside radius containing ring
+            theta_2     outside radius containing ring
+            num_theta   number of samples along theta
+            
+    outputs
+            theta_project  image values at points along line
+            theta_domain   domain over which image values are defined
+    """
+    n,m = img.shape
+    if(center==0): center = [round(n/2.0),round(m/2.0)]  
+
+    theta_domain  =   np.linspace(theta_1,theta_2,num_theta)
+    theta_project = np.zeros(theta_domain.shape)
+    
+    xa = a*np.cos(theta_domain) + center[0]
+    ya = b*np.sin(theta_domain) + center[1]    
+    x  =  (xa)*np.cos(rot) + (ya)*np.sin(rot)
+    y  = -(xa)*np.sin(rot) + (ya)*np.cos(rot) 
+    
+    for tidx in range(len(theta_domain)):
+        # identify surrounding four points
+        x_tidx = x[tidx]
+        y_tidx = y[tidx]
+        x1 = np.floor( x_tidx )
+        x2 = np.ceil(  x_tidx )
+        y1 = np.floor( y_tidx )
+        y2 = np.ceil(  y_tidx )
+
+        # make sure we are in image
+        if( (x1 < n) & (x2 < n) & (x1 > 0) & (x2 > 0) &
+            (y1 < m) & (y2 < m) & (y1 > 0) & (y2 > 0) ):
+            if((x2-x1 == 0) & (y2-y1 == 0)):
+                theta_project[tidx] = img[x1,y1]
+            elif((x2-x1) == 0):
+                theta_project[tidx] = img[x1,y1] + \
+                                (img[y2,x2]-img[y1,x1])*(y_tidx-y1)/(y2-y1)
+            elif((y2-y1) == 0):
+                theta_project[tidx] = img[x1,y1] + \
+                                (img[y2,x2]-img[y1,x1])*(x_tidx-x1)/(x2-x1)
+            else:
+                
+                # interpolate
+                a = np.matrix([x2-x_tidx,x_tidx-x1])
+                Q = np.matrix([[img[y1,x1],img[y1,x2]],
+                              [img[y2,x1],img[y2,x2]]])      
+                b = np.matrix([[y2-y_tidx],[y_tidx-y1]])
+                theta_project[tidx] = np.dot(np.dot(a,Q),b)/((x2-x1)*(y2-y1))
+
+    return theta_project, theta_domain  
     
 def gaussian_convolution(signal,sigma,C=4):
     """
@@ -602,15 +713,15 @@ def crop_around_max(x):
         indices = range(0,len(x))
      
     return x_crop, indices, center
-     
-     
-def ring_fit(img,r_est,dr,pf1=False):
+        
+def ring_fit_nonlin(img,r_est,dr,center=0,n_std=2,pf1=False):
     """  
     Fits an ellipse to a ring of an xray diffraction image 
     inputs
         img-    image of xray diffraction rings    
         r_est-  estimate of radius of ring of interest in pixels
         dr-     space around ring on either side in pixels
+        center          [row,col] position from which distance is measured
     outputs
         a-      x-axis radius parameter of fitted ellipse     
         b-      z-axis radius parameter of fitted ellipse
@@ -635,6 +746,9 @@ def ring_fit(img,r_est,dr,pf1=False):
     a,b,xc,zc,rot = RingIP.ring_fit(img,radius,dr)
 
     """  
+    if(center == 0):
+        n,m = img.shape
+        center = [n/2.0,m/2.0] 
     if(pf1):
         plt.close(pf1)
         plt.figure(pf1)
@@ -644,15 +758,87 @@ def ring_fit(img,r_est,dr,pf1=False):
     r_out = r_est + dr
 
     # Keeps only pixels near ring
-    bin_img = distance_threshold(img,r_in,r_out)    
+    bin_img = distance_threshold(img,r_in,r_out,center)    
     
     # Thresholds remainder of image with threshold 
     # 2 standard deviations above the mean
-    thresh_img = n_std_threshold(img*bin_img,1)
+    thresh_img = n_std_threshold(img*bin_img,n_std)
 
     # Converts identified pixels to a set of x,z,f data points
     x,z,f = get_points(img,bin_img*thresh_img)
 
+    # Fit ellipse to found points (ignores intensity)
+    out = fit_ellipse_nonlin_lstsq(x,z)
+    
+    a = out[0]
+    b = out[1]
+    xc  = out[2]
+    zc = out[3]
+
+    if(pf1):
+        plt.figure(pf1)
+        plt.plot(x,z,'wx')
+        xx,zz = gen_ellipse(a,b,xc,zc,0)
+        plt.plot(xx,zz,'w-')
+        plt.xlim([np.min(x)-10, np.max(x)+10])
+        plt.ylim([np.min(z)-10, np.max(z)+10])
+
+    return a, b, xc, zc     
+    
+    
+def ring_fit(img,r_est,dr,center=0,n_std=2,pf1=False):
+    """  
+    Fits an ellipse to a ring of an xray diffraction image 
+    inputs
+        img-    image of xray diffraction rings    
+        r_est-  estimate of radius of ring of interest in pixels
+        dr-     space around ring on either side in pixels
+        center          [row,col] position from which distance is measured
+    outputs
+        a-      x-axis radius parameter of fitted ellipse     
+        b-      z-axis radius parameter of fitted ellipse
+        xc-     x-coordinate of center of ellipse
+        zc-     z-coordinate of center of ellipse
+        rot-    orientation angle of ellipse
+        
+        
+    EX:
+    # Estimate radius of ring
+    plt.close('all')
+    plt.figure(1)
+    plt.imshow(img,cmap='jet',vmin=0,vmax=200)
+    xc = 1026
+    zc = 1018
+    radius_test = 606
+    plt.plot([xc,xc+radius_test],[zc,zc],'o-w')
+    
+    # Fit ring
+    radius = 370
+    dr     = 30
+    a,b,xc,zc,rot = RingIP.ring_fit(img,radius,dr)
+
+    """  
+    if(center == 0):
+        n,m = img.shape
+        center = [n/2.0,m/2.0] 
+    if(pf1):
+        plt.close(pf1)
+        plt.figure(pf1)
+        plt.imshow(img,cmap='jet',vmin=0,vmax=200)
+    
+    r_in = r_est - dr
+    r_out = r_est + dr
+
+    # Keeps only pixels near ring
+    bin_img = distance_threshold(img,r_in,r_out,center)    
+    
+    # Thresholds remainder of image with threshold 
+    # 2 standard deviations above the mean
+    thresh_img = n_std_threshold(img*bin_img,n_std)
+
+    # Converts identified pixels to a set of x,z,f data points
+    x,z,f = get_points(img,bin_img*thresh_img)
+    print('Number of points to fit: ' + str(len(x)))
     # Fit ellipse to found points (ignores intensity)
     out = fit_ellipse_lstsq(x,z)
     a = out[0]
@@ -666,8 +852,8 @@ def ring_fit(img,r_est,dr,pf1=False):
         plt.plot(x,z,'wx')
         xx,zz = gen_ellipse(a,b,xc,zc,rot)
         plt.plot(xx,zz,'w-')
-        plt.xlim([np.min(xx)-10, np.max(xx)+10])
-        plt.ylim([np.min(zz)-10, np.max(zz)+10])
+        plt.xlim([np.min(x)-10, np.max(x)+10])
+        plt.ylim([np.min(z)-10, np.max(z)+10])
 
     return a, b, xc, zc, rot     
      
@@ -809,23 +995,158 @@ def two_stage_ring_fit(img,edgeCut,r_est,dr,pf1=False,pf2=False):
         plt.ylim([np.min(zz)-10, np.max(zz)+10])
     return a2, b2, xc2, zc2, rot2
 
-def gen_ellipse(a,b,xc,yc,rot):
+def gen_ellipse(a,b,xc,yc,rot,domain=0):
     """
     Generates x,y data points along the perimeter of ellipse defined by inputs
     inputs            
             a-      x-axis radius parameter of fitted ellipse     
             b-      z-axis radius parameter of fitted ellipse
             xc-     x-coordinate of center of ellipse
-            zc-     z-coordinate of center of ellipse
+            yc-     y-coordinate of center of ellipse
             rot-    orientation angle of ellipse
     
     outputs
             x       x-coordinates of points on ellipse
             y       y-coordinates of points on ellipse
     """
-    t         = np.linspace(0,2*np.pi,num=10000)
-    xa        = xc + a*np.cos(t)
-    ya        = yc + b*np.sin(t)
+    if(np.isscalar(domain)):
+        domain         = np.linspace(0,2*np.pi,num=10000)
+        
+    xa        = xc + a*np.cos(domain)
+    ya        = yc + b*np.sin(domain)
     x  =  (xa)*np.cos(rot) + (ya)*np.sin(rot)
     y  = -(xa)*np.sin(rot) + (ya)*np.cos(rot) 
     return x,y
+    
+class RingSpreadFit:
+    def __init__(self,load_step,img_num,a,b,xc,zc,
+                 f,theta,coefs,intercept,fit,
+                 l1_ratio,means,variances,
+                 n_iter,fit_error,rel_fit_error):
+                         
+        self.load_step = load_step
+        self.img_num = img_num        
+        
+        # Ellipse params
+        self.a = a
+        self.b = b
+        self.xc = xc
+        self.zc = zc
+        
+        # Interpolated data
+        self.f = f
+        self.theta = theta
+        
+        # Lasso fit to interpolated data
+        self.coefs = coefs
+        self.intercept = intercept
+        self.fit = fit
+        self.l1_ratio = l1_ratio
+        self.means = means
+        self.variances = variances
+        self.n_iter = n_iter
+        self.fit_error = fit_error
+        self.rel_fit_error = rel_fit_error
+
+        # Scalar spread metrics
+        self.compute_convex_var()
+        self.compute_az_var()       
+
+    def plot_ellipse(self,img,fig_num=0):
+        plt.figure(fig_num)
+        plt.imshow(img,cmap='jet',vmin=0,vmax=200)        
+        xx,zz = gen_ellipse(self.a,self.b,self.xc,self.zc,0)
+        plt.plot(xx,zz,'w-')
+        plt.xlim([np.min(xx),np.max(xx)])
+        plt.ylim([np.min(zz),np.max(zz)])
+        plt.axes().set_aspect('equal')
+    
+    def plot_fit(self,fig_num=0):
+        plt.figure(fig_num)
+        plt.plot(self.theta,self.fit,'-xr',label='Fit')
+        plt.plot(self.theta,self.f,'-ob',label='Data')
+        plt.ylabel('Intensity')
+        plt.xlabel('Angle (Radians)')
+        plt.legend()
+        
+    def plot_coefs(self,fig_num=0):
+        plt.figure(fig_num)
+        plt.plot(self.coefs,'o')
+        plt.ylabel('Coefficient value')
+        plt.xlabel('Coefficient index')
+    
+    def plot_bases(self,dtheta,r_avg,fig_num=0):
+        plt.figure(fig_num)        
+        plt.plot(self.theta,self.f,'o-b') 
+        plt.ylabel('Intensity')
+        plt.xlabel('Angle (Radians)')
+         
+        # Construct B
+        dom = np.arange(len(self.coefs))
+        keep = dom[np.abs(self.coefs)>0]
+        for i in keep:
+            basis = EM.gaussian_basis(len(self.f),dtheta,r_avg,
+                                      self.means[i],self.variances[i])
+            plt.figure(fig_num)
+            plt.plot(self.theta,self.coefs[i]*basis+self.intercept)  
+
+    def plot_bases_grouped(self,dtheta,r_avg,fig_num=0):
+        plt.figure(fig_num)        
+        plt.plot(self.theta,self.f,'o-b') 
+        plt.ylabel('Intensity')
+        plt.xlabel('Angle (Radians)')
+         
+        # Construct B
+        dom = np.arange(len(self.coefs))
+        keep = dom[np.abs(self.coefs)>0]
+        last_mean = 0
+        basis = np.zeros(len(self.f))
+        for i in keep:
+            if(self.means[i] == last_mean):
+                basis += self.coefs[i]*EM.gaussian_basis(len(self.f),
+                                           dtheta,
+                                           r_avg,
+                                           self.means[i],
+                                           self.variances[i])
+            else:
+                # Plot last basis
+                plt.figure(fig_num)
+                plt.plot(self.theta,basis+self.intercept)
+                
+                # Start a new one
+                basis = self.coefs[i]*EM.gaussian_basis(len(self.f),
+                                          dtheta,
+                                          r_avg,
+                                          self.means[i],
+                                          self.variances[i])
+                last_mean = self.means[i]
+            
+              
+
+    def scatter_amp_var(self,fig_num=0):
+        plt.figure(fig_num)
+        ind = self.coefs > 0
+        plt.plot(self.coefs[ind],self.variances[ind],'o')
+        plt.ylabel('Variance')
+        plt.xlabel('Amplitude')
+        
+    def compute_convex_var(self):
+        ind = self.coefs > 0
+        self.convex_var = np.sum(self.coefs[ind]* \
+                          self.variances[ind])  / \
+                          np.sum(self.coefs[ind])
+        
+    def compute_az_var(self):
+        self.az_var = np.var(self.f/np.sum(self.f))
+        
+    def print_params(self):
+        print('Number nonzero coefficients: ' + str(np.sum(self.coefs>0)))
+        print('Number of iterations: ' + str(self.n_iter))
+        print('Fit error: ' + str(self.fit_error))
+        print('Relative Fit error: ' + str(self.rel_fit_error))
+        print('Ellipse params a='+str(self.a)+', b='+str(self.b)+\
+              ', xc='+str(self.xc)+', zc='+str(self.zc) )
+        print('l1_ratio = ' + str(self.l1_ratio))
+        print('convex_var = ' + str(self.convex_var))
+        print('az_var = ' + str(self.az_var))
+           

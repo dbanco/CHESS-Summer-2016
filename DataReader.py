@@ -50,7 +50,7 @@ def mmpad_reader(path, num_images=10000, image_size=[266, 396], chip_size=128):
     outputs:
     images            : numpy array of images (number of images x image size x image size) """
     
-    fid        = open(path, 'r')                    
+    fid        = open(path, 'rb')                    
     images_1d  = np.fromfile(fid, dtype=np.float32)  
     fid.close()                                     
     
@@ -79,6 +79,27 @@ def ge2_reader(path, header_size=4096, image_size=2048):
     images     = np.array(image_1d[header_size:].reshape(num_images,image_size,image_size), dtype=float)
     
     return images
+    
+def ge2_reader_image(path,image_num, header_size=4096, image_size=2048):
+    """ function reads in an image(s) from the ge2 detector 
+    
+    inputs:
+    path              : path to image file 
+    image_num         : index of image to read (starting at 0)
+    header_size       : size of image header in bits
+    image_size        : size of each image in pixels 
+    
+    outputs:
+    images            : numpy array of images (number of images x image size x image size) """
+    
+    fid        = open(path, 'rb')
+    fid.seek(header_size + 2*image_num*(image_size**2)  , os.SEEK_SET)                    
+    image_1d   = np.fromfile(fid,count=image_size**2, dtype=np.uint16)  
+    fid.close()                                     
+    
+    image     = np.array(image_1d.reshape(image_size,image_size), dtype=float)
+    
+    return image
   
 
   
