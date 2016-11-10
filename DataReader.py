@@ -4,18 +4,8 @@ Data Reading Functions
 @author: Kenny Swartz
 06/07/2016
 """
-import os
+import os, csv
 import numpy as np
-import csv
-
-
-
-def read_data_from_text(path):
-    file    = open(path, 'r') 
-    data    = np.loadtxt(file, dtype=float)
-    file.close()
-    return data
-
 
 
 def vic2d_reader(path):
@@ -39,26 +29,6 @@ def vic2d_reader(path):
     return data    
 
 
-def mmpad_reader(path, num_images=10000, image_size=[266, 396], chip_size=128):
-    """ function reads in image(s) from the mmpad detector  
-    
-    inputs:
-    path              : path to image file 
-    header_size       : size of image header in bits
-    image_size        : size of each image in pixels 
-    
-    outputs:
-    images            : numpy array of images (number of images x image size x image size) """
-    
-    fid        = open(path, 'rb')                    
-    images_1d  = np.fromfile(fid, dtype=np.float32)  
-    fid.close()                                     
-    
-    images     = images_1d.reshape((num_images, image_size[0], image_size[1]))
-    images     = images[:, 1:1+chip_size, 1:1+chip_size]
-
-    return images
-
 
 def ge2_reader(path, header_size=4096, image_size=2048):
     """ function reads in an image(s) from the ge2 detector 
@@ -79,7 +49,7 @@ def ge2_reader(path, header_size=4096, image_size=2048):
     images     = np.array(image_1d[header_size:].reshape(num_images,image_size,image_size), dtype=float)
     
     return images
-    
+  
 def ge2_reader_image(path,image_num, header_size=4096, image_size=2048):
     """ function reads in an image(s) from the ge2 detector 
     
@@ -101,8 +71,6 @@ def ge2_reader_image(path,image_num, header_size=4096, image_size=2048):
     
     return image
   
-
-  
 def get_ge2_path(directory, dir_num, file_num, file_num_digits=5):
     """ function creates the path to a .ge2 file using Chess conventions
     
@@ -116,7 +84,6 @@ def get_ge2_path(directory, dir_num, file_num, file_num_digits=5):
     path              : path to desired .ge2 file """
     
     file_name  = 'ff_' + (file_num_digits-len(str(file_num)))*'0' + str(file_num) + '.ge2'
-    path       = os.path.join(directory, str(dir_num), 'ff', file_name)
+    path       = os.path.join(directory, str(dir_num),'ff', file_name)
 
-    
     return path

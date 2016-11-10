@@ -15,7 +15,9 @@ import numpy as np
 import numpy.linalg as la
 from scipy.optimize import leastsq           # Levenberg-Marquadt Algorithm #
 from scipy.interpolate import interp1d
-#from savitzky_golay import savitzky_golay   # Smoothing algorithm ##
+
+####################################################################################
+####################################################################################
 
 def lorentzian(x, param):       # two sided Lorentz function
 
@@ -32,7 +34,12 @@ def lorentzian(x, param):       # two sided Lorentz function
     RL       = amp*(NRL/DRL)
     
     return np.hstack([LL,RL])
+    
+def residualsL(param, x, y):
+    return y - lorentzian(x, param)     
    
+####################################################################################
+    
 def gaussian(x, param):         # two sided gaussian function
 
     peakCtr, fwhmL, fwhmR, amp = param
@@ -48,6 +55,11 @@ def gaussian(x, param):         # two sided gaussian function
     RG       = amp*np.exp(-NRG/DRG)
     
     return np.hstack([LG,RG])
+
+def residualsG(param, x, y):
+    return y - gaussian(x, param)
+
+####################################################################################
 
 def pseudovoigt(x, param, n):    # two sided Pseudo-Voight function 
 
@@ -65,7 +77,7 @@ def pseudovoigt(x, param, n):    # two sided Pseudo-Voight function
     DLG      = 2*(sL)**2
     LG       = amp*np.exp(NLG/DLG)
     
-    xR       = x[x> peakCtr]
+    xR       = x[x>peakCtr]
     
     gR       = fwhmR/2
     NRL      = gR**2
@@ -83,36 +95,49 @@ def pseudovoigt(x, param, n):    # two sided Pseudo-Voight function
     
     return Comb
 
-def residualsL(param, x, y):
-    return y - lorentzian(x, param) 
-
-def residualsG(param, x, y):
-    return y - gaussian(x, param)
-
 def residualsPV(param, x, y, n):
     return y - pseudovoigt(x, param, n)
 
+####################################################################################
+####################################################################################
 
-def fitPeak(x, y, peakCtr, fwhm=10, amp=3000, FitType='Gaussian', n=1):  
+def get_peak_fit_indices(peak, ctr=0.5, lo=0.2, hi=0.8):
+    """ function determines indices required for PeakFitting function
+    
+    inputs:
+    peak              : 1d array of peak
+    ctr, lo, hi       : location of peak center, left cutoff, and right cutoff as a ratio of the length of the peak vector
+    
+    outputs:
+    peakCtr, loCut, hiCut : indices of peak vector corresponding to peak center, left cutoff, and right cutoff """
+    
+    peakCtr = int(round(len(peak)*ctr))
+    loCut   = int(round(len(peak)*lo))
+    hiCut   = int(round(len(peak)*hi))
+    
+    return peakCtr, loCut, hiCut
+
+
+def fitPeak(x, y, peakCtr0, fwhm0=10, amp0=3000, FitType='Gaussian', n=1):  
     """
     Gaussian will be the default fit unless another is specified.
     For the Pseudo-Voight fit n=1 will be default unless another is specified
     n is a mixing parameter, it is not necessary for the Lorentzian or Gaussian fits
     """
-    param = [peakCtr, fwhm, fwhm, amp]
+    param0 = [peakCtr0, fwhm0, fwhm0, amp0]
     
     if FitType == 'Lorentzian':
-        param_opt = leastsq(residualsL,  param, args=(x, y),    full_output=1)[0]
+        param_opt = leastsq(residualsL,  param0, args=(x, y),    full_output=1)[0]
         fit       = lorentzian(x, param_opt)
         err       = la.norm( residualsL(param_opt, x, y), 2.0) / la.norm(y, 2.0)
         
     elif FitType == 'Gaussian':
-        param_opt = leastsq(residualsG,  param, args=(x, y),    full_output=1)[0]
+        param_opt = leastsq(residualsG,  param0, args=(x, y),    full_output=1)[0]
         fit       = gaussian(x, param_opt)
         err       = la.norm( residualsG(param_opt, x, y), 2.0) / la.norm(y, 2.0)
         
     elif FitType == 'PseudoVoigt':
-        param_opt = leastsq(residualsPV, param, args=(x, y, n), full_output=1)[0]
+        param_opt = leastsq(residualsPV, param0, args=(x, y, n), full_output=1)[0]
         fit       = pseudovoigt(x, param_opt, n)
         err       = la.norm( residualsPV(param_opt, x, y, n), 2.0) / la.norm(y, 2.0)
 
@@ -121,11 +146,12 @@ def fitPeak(x, y, peakCtr, fwhm=10, amp=3000, FitType='Gaussian', n=1):
     
 def RemoveBackground(x, y, loCut, hiCut):
     
-    x_bg        = np.concatenate([ x[x<=loCut], x[x>=hiCut] ])
-    y_bg        = np.concatenate([ y[x<=loCut], y[x>=hiCut] ])
-
-    f           = interp1d(x_bg, y_bg)
-    background  = f(x)
+    x_bg        = np.concatenate([ x[x<loCut], x[x>hiCut] ])
+    y_bg        = np.concatenate([ y[x<loCut], y[x>hiCut] ])
+    
+    #f           = interp1d(x_bg, y_bg)
+    coeff       = np.polyfit(x_bg, y_bg, 1.0)
+    background  = np.polyval(coeff, x)
     
     yClean      =  y - background
     

@@ -4,13 +4,18 @@ Created on Sat Jun 11 16:08:40 2016
 @author: Kenny Swartz, Dan Banco
 """
 import numpy as np
-from scipy.optimize import leastsq
 import matplotlib.pyplot as plt
+
+from numpy.linalg import norm 
+from scipy.optimize import leastsq
 from scipy.signal import argrelmax
+from sklearn.linear_model import Lasso
+
 import DataAnalysis as DA
 import PeakFitting as peak
 import EllipticModels as EM
 import os
+import time
 
 
 def fit_circle_nonlin_lstsq(x, y, plot_flag=0):
@@ -310,7 +315,7 @@ def get_points(img,bin_img):
     return x,y,f
 
 
-def radial_projection(img,center,r,num_r,theta,r_in,r_out,):
+def radial_projection(img,center,r,num_r,theta,r_in,r_out,pf1=0):
     """
     Interpolates along a line in the radial direction
     
@@ -321,7 +326,7 @@ def radial_projection(img,center,r,num_r,theta,r_in,r_out,):
             num_r   number of points to sample along line
             theta   angle of line
             r_in    inside radius containing ring
-            r_out   outside radius containing ring]
+            r_out   outside radius containing ring
             
     outputs
             r_project  image values at points along line
@@ -331,12 +336,20 @@ def radial_projection(img,center,r,num_r,theta,r_in,r_out,):
     if(center==0): center = [round(n/2.0),round(m/2.0)]  
 
     r_domain  =   np.linspace(r_in,r_out,num_r)
-    r_project = np.zeros(r_domain.shape)
+    x_domain = r_domain*np.cos(theta) + center[0]
+    y_domain = r_domain*np.sin(theta) + center[1]
+    
+    if(pf1):
+        plt.figure(pf1)
+        plt.plot(x_domain,y_domain,'-ow')
+    
+    r_project = np.zeros(r_domain.shape)      
     
     for ridx in range(len(r_domain)):
+        
         # identify surrounding four points
-        x = r_domain[ridx]*np.cos(theta) + center[0]
-        y = r_domain[ridx]*np.sin(theta) + center[1]     
+        x = x_domain[ridx]
+        y = y_domain[ridx]     
         x1 = np.floor( x )
         x2 = np.ceil(  x )
         y1 = np.floor( y )
@@ -376,8 +389,6 @@ def line_normal_to_curve(x0,y0,distance):
     outputs
         x           coordinates of two points
         y           coordinates of two points
-        slope       slope of line normal to ellipse at x0,y0
-        intercept   y-intercpet of the line normal to ellipse at x0,y0
     """
    
     if( np.abs(y0[1]) > np.abs(x0[1])):
@@ -386,48 +397,54 @@ def line_normal_to_curve(x0,y0,distance):
         f_diff = (y0[2]-y0[1])/(x0[2]-x0[1])
         slope  = -1/(0.5*b_diff + 0.5*f_diff)
         intercept = -slope*x0[1] + y0[1]
-        
-        # Polynomial coefficients
-        p = [(1 + slope**2), 
-             (2*slope*(intercept - y0[1]) - 2*x0[1]), 
-             ((intercept - y0[1])**2 + x0[1]**2 - distance**2) ]  
-        
-        x = np.real(np.roots(p))
-        y = np.real(slope*x + intercept)
+ 
+        if(np.isinf(slope) or np.abs(slope) > 10**8):
+            y = np.array([y0[1]-distance,y0[1]+distance])
+            x = np.array([x0[1],x0[1]])
+        else:              
+            # Polynomial coefficients
+            p = [(1 + slope**2), 
+                 (2*slope*(intercept - y0[1]) - 2*x0[1]), 
+                 ((intercept - y0[1])**2 + x0[1]**2 - distance**2) ] 
+            x = np.real(np.roots(p))
+            y = np.real(slope*x + intercept)
     else:
         # Slope of line normal to ellipse at that point
         b_diff = (x0[1]-x0[0])/(y0[1]-y0[0])
         f_diff = (x0[2]-x0[1])/(y0[2]-y0[1])
         slope  = -1/(0.5*b_diff + 0.5*f_diff)
         intercept = -slope*y0[1] + x0[1]
-        
-        # Polynomial coefficients
-        p = [(1 + slope**2), 
-             (2*slope*(intercept - x0[1]) - 2*y0[1]), 
-             ((intercept - x0[1])**2 + y0[1]**2 - distance**2) ] 
-       
-        y = np.roots(p)
-        x = slope*y + intercept
+
+        if(np.isinf(slope) or np.abs(slope) > 10**8):
+            x = np.array([x0[1]-distance,x0[1]+distance])
+            y = np.array([y0[1],y0[1]])
+        else:
+            # Polynomial coefficients
+            p = [(1 + slope**2), 
+                 (2*slope*(intercept - x0[1]) - 2*y0[1]), 
+                 ((intercept - x0[1])**2 + y0[1]**2 - distance**2) ] 
+            y = np.real(np.roots(p))
+            x = np.real(slope*y + intercept)
     return x, y
     
 
-def radial_projection_ellipse(img,xc,yc,a,b,orient,num_r,theta,distance):
+def radial_projection_ellipse(img,xc,yc,a,b,orient,theta,distance,pf1):
     """
     Interpolates along a line in the radial direction
     
     inputs
-            img     image
-            center  center of the rings in the image
-            a,b     major/minor axis of ring of interest
-            orient  angle at which ellipse is oriented
-            num_r   number of points to sample along line
-            theta   angle of line (give three angles to identify center)
-            d_in    inside window containing ring
-            d_out   outside window containing ring]
-            
+            img      image
+            center   center of the rings in the image
+            a,b      major/minor axis of ring of interest
+            orient   angle at which ellipse is oriented
+            theta    angle of line (give three angles to identify center)
+            distance range over which to project radially
+            d_in     inside window containing ring
+            d_out    outside window containing ring]
+            pf1      plots all interpolated points if true
     outputs
-            r_project  image values at points along line
-            r_domain   domain over which image values are defined
+            f     image values at points along line
+            x,y   domain over which image values are defined
     """
     # Points centered at angle theta[1]
  
@@ -438,12 +455,14 @@ def radial_projection_ellipse(img,xc,yc,a,b,orient,num_r,theta,distance):
 
     # Get endpoints of line perpendicular to ellipse at x0, y0
     x_l, y_l = line_normal_to_curve(x0,y0,distance)
-
+    if(y_l[0] > 5000):print(theta)
     sort = (x_l-xc)**2 + (y_l-yc)**2
     sort_ind = [np.argmin(sort), np.argmax(sort)]
+    
     x_line = x_l[sort_ind]
     y_line = y_l[sort_ind]                       
 
+    
     if( x_line[1] == x_line[0]):
         x_domain = x_line[0]*np.ones(2*distance)
         y_domain = np.linspace(y_line[0],y_line[1],2*distance)
@@ -455,7 +474,11 @@ def radial_projection_ellipse(img,xc,yc,a,b,orient,num_r,theta,distance):
         y_domain = np.linspace(y_line[0],y_line[1],2*distance)
         
     f = np.zeros(x_domain.shape)
-     
+
+    if(pf1):
+        plt.figure(pf1)
+        plt.plot(x_domain,y_domain,'-ow')
+
     for idx in range(len(x_domain)):
         
         # identify surrounding four points
@@ -542,7 +565,7 @@ def azimuthal_projection(img,center,r,theta_1,theta_2,num_theta):
 
 def azimuthal_projection_ellipse(img,center,a,b,rot,theta_1,theta_2,num_theta):
     """
-    Interpolates along a line in the radial direction
+    Interpolates along an ellipse in the azimuthal direction
     
     inputs
             img         image
@@ -550,8 +573,12 @@ def azimuthal_projection_ellipse(img,center,a,b,rot,theta_1,theta_2,num_theta):
             a           x-axis radius parameter of ellipse
             b           y-axis radius parameter of ellipse     
             rot         orientation of ellipse
-            theta_1     inside radius containing ring
-            theta_2     outside radius containing ring
+            theta_1     first angle at which ellipse is sampled
+            theta_2     last angle at which ellipse is sample
+                        Angular distance between theta1 and theta2 should be
+                        dtheta ot acheive uniformly spaced points around the 
+                        entire ellipse
+                        ie: 0 and 2*np.pi-dtheta
             num_theta   number of samples along theta
             
     outputs
@@ -599,6 +626,45 @@ def azimuthal_projection_ellipse(img,center,a,b,rot,theta_1,theta_2,num_theta):
                 theta_project[tidx] = np.dot(np.dot(a,Q),b)/((x2-x1)*(y2-y1))
 
     return theta_project, theta_domain  
+    
+def azimuthal_projection_ellipse_radial_sum(img,center,a,b,theta_domain,radial_distance,pf1=0):
+    """
+    Interpolates along radial lines normal to an ellipse that are evenly spaced
+    in azimuthal angle around the ellipse. Radial lines are averaged to
+    compute an intensity value at each azimuthal angle along the perimeter of
+    the ellipse. The exact sample points can be provided.
+    
+    inputs
+            img            image
+            center         center of the rings in the image
+            a                  x-axis radius parameter of ellipse
+            b                  y-axis radius parameter of ellipse     
+            theta_domain       azimuthal domain where image values are 
+                               interpolated
+            radial_distance    distance from perimeter of ellipse over which
+                               pixel values are averaged
+            
+    outputs
+            theta_project  image values at points along line
+            
+    """
+    n,m = img.shape
+    if(center==0): center = [round(n/2.0),round(m/2.0)]  
+    
+    num_theta = len(theta_domain)
+    f_az = np.zeros(theta_domain.shape)
+    for az_i, az in enumerate(theta_domain):
+        az_l = theta_domain[int(az_i-1)%num_theta]
+        az_r = theta_domain[int(az_i+1)%num_theta]
+        f_rad, x_rad, y_rad = radial_projection_ellipse(img,
+                                                        center[0],center[1],
+                                                        a,b,0,
+                                                        [az_l,az,az_r],
+                                                        radial_distance,pf1)                                                    
+        f_az[az_i] = np.mean(f_rad)    
+    
+
+    return f_az, theta_domain 
     
 def gaussian_convolution(signal,sigma,C=4):
     """
@@ -714,7 +780,7 @@ def crop_around_max(x):
      
     return x_crop, indices, center
         
-def ring_fit_nonlin(img,r_est,dr,center=0,n_std=2,pf1=False):
+def ring_fit_nonlin(img,r_est,dr,center=0,n_std=3,pf1=False):
     """  
     Fits an ellipse to a ring of an xray diffraction image 
     inputs
@@ -752,7 +818,7 @@ def ring_fit_nonlin(img,r_est,dr,center=0,n_std=2,pf1=False):
     if(pf1):
         plt.close(pf1)
         plt.figure(pf1)
-        plt.imshow(img,cmap='jet',vmin=0,vmax=200)
+        plt.imshow(img,cmap='jet',vmin=0,vmax=200,interpolation='nearest')
     
     r_in = r_est - dr
     r_out = r_est + dr
@@ -763,7 +829,19 @@ def ring_fit_nonlin(img,r_est,dr,center=0,n_std=2,pf1=False):
     # Thresholds remainder of image with threshold 
     # 2 standard deviations above the mean
     thresh_img = n_std_threshold(img*bin_img,n_std)
-
+    
+    if(pf1):
+        plt.close(pf1+1)
+        plt.figure(pf1+1)
+        plt.imshow(img*bin_img,cmap='jet',vmin=0,vmax=200)    
+    
+        plt.close(pf1+2)
+        plt.figure(pf1+2)
+        plt.imshow(img*bin_img*thresh_img,cmap='jet',vmin=0,vmax=200)  
+        
+        plt.close(pf1+3)
+        plt.figure(pf1+3)
+        plt.imshow(img*bin_img,cmap='jet',vmin=0,vmax=200)    
     # Converts identified pixels to a set of x,z,f data points
     x,z,f = get_points(img,bin_img*thresh_img)
 
@@ -776,8 +854,8 @@ def ring_fit_nonlin(img,r_est,dr,center=0,n_std=2,pf1=False):
     zc = out[3]
 
     if(pf1):
-        plt.figure(pf1)
-        plt.plot(x,z,'wx')
+        plt.figure(pf1+3)
+        #plt.plot(x,z,'wx')
         xx,zz = gen_ellipse(a,b,xc,zc,0)
         plt.plot(xx,zz,'w-')
         plt.xlim([np.min(x)-10, np.max(x)+10])
@@ -1048,12 +1126,7 @@ class RingSpreadFit:
         self.fit_error = fit_error
         self.rel_fit_error = rel_fit_error
 
-        # Scalar spread metrics
-        self.compute_convex_var()
-        self.compute_az_var()       
-
-    def plot_ellipse(self,img,fig_num=0):
-        plt.figure(fig_num)
+    def plot_ellipse(self,img):
         plt.imshow(img,cmap='jet',vmin=0,vmax=200)        
         xx,zz = gen_ellipse(self.a,self.b,self.xc,self.zc,0)
         plt.plot(xx,zz,'w-')
@@ -1075,24 +1148,24 @@ class RingSpreadFit:
         plt.ylabel('Coefficient value')
         plt.xlabel('Coefficient index')
     
-    def plot_bases(self,dtheta,r_avg,fig_num=0):
+    def plot_bases_wrap(self,dtheta,fig_num=0):
         plt.figure(fig_num)        
-        plt.plot(self.theta,self.f,'o-b') 
         plt.ylabel('Intensity')
         plt.xlabel('Angle (Radians)')
          
         # Construct B
         dom = np.arange(len(self.coefs))
         keep = dom[np.abs(self.coefs)>0]
+        full_fit = np.zeros(len(self.theta))
+
         for i in keep:
-            basis = EM.gaussian_basis(len(self.f),dtheta,r_avg,
+            basis = EM.gaussian_basis_wrap(len(self.f),dtheta,
                                       self.means[i],self.variances[i])
             plt.figure(fig_num)
-            plt.plot(self.theta,self.coefs[i]*basis+self.intercept)  
-
+            plt.plot(self.theta,self.coefs[i]*basis,'r-') 
+        
     def plot_bases_grouped(self,dtheta,r_avg,fig_num=0):
         plt.figure(fig_num)        
-        plt.plot(self.theta,self.f,'o-b') 
         plt.ylabel('Intensity')
         plt.xlabel('Angle (Radians)')
          
@@ -1103,9 +1176,8 @@ class RingSpreadFit:
         basis = np.zeros(len(self.f))
         for i in keep:
             if(self.means[i] == last_mean):
-                basis += self.coefs[i]*EM.gaussian_basis(len(self.f),
+                basis += self.coefs[i]*EM.gaussian_basis_wrap(len(self.f),
                                            dtheta,
-                                           r_avg,
                                            self.means[i],
                                            self.variances[i])
             else:
@@ -1116,7 +1188,6 @@ class RingSpreadFit:
                 # Start a new one
                 basis = self.coefs[i]*EM.gaussian_basis(len(self.f),
                                           dtheta,
-                                          r_avg,
                                           self.means[i],
                                           self.variances[i])
                 last_mean = self.means[i]
@@ -1149,4 +1220,256 @@ class RingSpreadFit:
         print('l1_ratio = ' + str(self.l1_ratio))
         print('convex_var = ' + str(self.convex_var))
         print('az_var = ' + str(self.az_var))
-           
+
+def lasso_ring_fit(rsf,initial_sampling,basis_path,var_domain):
+    """
+    inputs:
+    rsf                 RingSpreadFit object with ring image data is already loaded
+    initial_sampling    integer that divides number of variances (every nth variance)
+    basis_path          base file path containing basis vector files
+    
+    outputs:
+    rsf                 RingSpreadFit object with fitted data
+    
+    """
+    absolute_start = time.time()    
+    
+    print('Constructing B...')
+    start = time.time()
+    local_maxima = argrelmax(rsf.f)[0]
+ 
+    
+    B = np.empty([len(rsf.f),0])
+    B_var = np.empty(0)
+    B_mean = np.empty(0)
+    for i in local_maxima:
+        B_load = np.load(basis_path + str(i) + '.npy')
+        B = np.hstack([B,B_load[:,::initial_sampling]])
+        B_mean = np.append(B_mean, i*np.ones(len(var_domain)/initial_sampling))
+        B_var  = np.append(B_var,  var_domain[::initial_sampling])
+    
+    timeB1 = time.time() - start
+    print(timeB1)
+    
+    print('Lasso fitting...')
+    start = time.time()
+    l1_ratio = 0.08
+    lasso = Lasso(alpha=l1_ratio,
+                  max_iter=5000,
+                  fit_intercept=0,
+                  positive=True)
+    # fit
+    lasso.fit(B,rsf.f)        
+    fit = np.dot(B,lasso.coef_) + lasso.intercept_
+    fit_error     = np.linalg.norm(fit-rsf.f)
+    rel_fit_error = np.linalg.norm(fit-rsf.f)/ \
+                    np.linalg.norm(rsf.f)  
+                    
+    timeFit1 = time.time()-start
+    print(timeFit1)
+    
+    rsf.coefs = lasso.coef_
+    rsf.intercept = lasso.intercept_
+    rsf.fit = fit
+    rsf.l1_ratio = l1_ratio,
+    rsf.means = B_mean
+    rsf.variances = B_var
+    rsf.n_iter = lasso.n_iter_
+    rsf.fit_error = fit_error
+    rsf.rel_fit_error = rel_fit_error    
+    
+    total_time = time.time() - absolute_start
+    
+    print('rel_fit_error = ' + str(rsf.rel_fit_error))
+    
+    return rsf, [timeB1,timeFit1,total_time]
+    
+def refined_lasso_ring_fit(rsf,initial_sampling,refined_sampling,basis_path,var_domain):
+    """
+    inputs:
+    rsf                 RingSpreadFit object with ring image data is already loaded
+    initial_sampling    integer that divides number of variances (every nth variance)
+    refined_sampling    integer that divides number of variances (every nth variance)
+    basis_path          base file path containing basis vector files
+    var_domain          set of variances used to define basis functions at each mean
+    
+    outputs:
+    rsf_refine          RingSpreadFit object with initial + refined fit
+    rsf                 RingSpreadFit object with initial fit only
+    benchmark           Time benchmarks for each stage of algorithm:
+                        [timeB1,timeFit1,timeB2,timeFit2,total_time]  
+                        Construct initial dictionary time
+                        Fit using initial dictionary time
+                        Construct refined dictionary time
+                        Fit using refined dictionary time
+                        Total run time
+    
+    """
+    absolute_start = time.time()    
+    
+    print('Constructing B...')
+    start = time.time()
+    
+    # Find local maxima
+    local_maxima = argrelmax(rsf.f)[0]
+ 
+    # Create overcomplete dictionary of Gaussians at local maxima
+    B = np.empty([len(rsf.f),0])
+    B_var = np.empty(0)
+    B_mean = np.empty(0)
+    for i in local_maxima:
+        # Load precomputed matrix of Gaussians at location i
+        B_load = np.load(basis_path + str(i) + '.npy')
+        # Append to overcomplete dictionary
+        B = np.hstack([B,B_load[:,::initial_sampling]])
+        # Keep track of means and variances of these Gaussians
+        B_mean = np.append(B_mean, i*np.ones(len(var_domain)/initial_sampling))
+        B_var  = np.append(B_var,  var_domain[::initial_sampling])
+    
+    timeB1 = time.time() - start
+    print(timeB1)
+    
+    print('Lasso fitting...')
+    start = time.time()
+    
+    # Define a Scikit-learn Lasso solver
+    l1_ratio = 0.08
+    lasso = Lasso(alpha=l1_ratio,
+                  max_iter=5000,
+                  fit_intercept=0,
+                  positive=True)
+    
+    # Fit data using overcomplete dictionary
+    lasso.fit(B,rsf.f)        
+    fit = np.dot(B,lasso.coef_) + lasso.intercept_
+    fit_error     = np.linalg.norm(fit-rsf.f)
+    rel_fit_error = np.linalg.norm(fit-rsf.f)/ \
+                    np.linalg.norm(rsf.f)  
+                    
+    timeFit1 = time.time()-start
+    print(timeFit1)
+    
+    # Save results
+    rsf.coefs = lasso.coef_
+    rsf.intercept = lasso.intercept_
+    rsf.fit = fit
+    rsf.l1_ratio = l1_ratio,
+    rsf.means = B_mean
+    rsf.variances = B_var
+    rsf.n_iter = lasso.n_iter_
+    rsf.fit_error = fit_error
+    rsf.rel_fit_error = rel_fit_error
+
+    print('Refining B...')
+    start = time.time()
+    
+    # Compute local fit error
+    loc_error = np.zeros(len(local_maxima))
+    for i, max_i in enumerate(local_maxima[1:-1]):
+        # Define neighborhoods as being halfway between local maxima
+        up  = np.int(np.round(max_i + np.abs(local_maxima[i+1] - max_i)/2))
+        dwn = np.int(np.round(max_i - np.abs(local_maxima[i-1] - max_i)/2))
+
+        # Wrap neighborhood error computation at 0/2pi
+        if(dwn > 0):
+            loc_error[i] = norm(rsf.f[dwn:up]-rsf.fit[dwn:up])/norm(rsf.f)
+                           
+        else:
+            func = np.append(rsf.f[dwn:-1],rsf.f[0:up])
+            func_fit = np.append(rsf.fit[dwn:-1],rsf.fit[0:up])
+            loc_error[i] = norm(func-func_fit)/norm(rsf.f)
+    
+    mean_error = np.mean(loc_error)
+    
+    # Find local maxima where error is above average 
+    new_coefs = lasso.coef_
+    for i, max_i in enumerate(local_maxima[loc_error > mean_error]):
+        # Multiply these local maxima by 0 to remove contribution
+        keep_coefs = B_mean != max_i 
+        new_coefs = new_coefs*keep_coefs
+        
+    # Compute fit contribution from this initial stage 
+    sub_fit = np.dot(B,new_coefs) + lasso.intercept_
+    
+    # Construct new overcomplete dictionary with only high error maxima, 
+    # but with higher variance sampling density
+    B_new = np.empty([len(rsf.f),0])
+    B_var_new = np.empty(0)
+    B_mean_new = np.empty(0)
+    # Only place Gaussians where local error was above average in initial fit
+    for i in local_maxima[loc_error > mean_error]:
+        B_load_new = np.load(basis_path + str(i) + '.npy')
+        B_new = np.hstack([B_new,B_load_new[:,::refined_sampling]])
+        B_mean_new = np.append(B_mean_new, i*np.ones(len(var_domain)/refined_sampling))
+        B_var_new  = np.append(B_var_new,  var_domain[::refined_sampling])
+
+        
+    timeB2 = time.time()-start
+    print(timeB2)
+        
+    
+    start = time.time()
+    print('Lasso fitting refine...')
+    # Fit the data only at locations where local error was high initially 
+    # using identical Lasso parameters
+    lasso.fit(B_new,rsf.f-sub_fit) 
+    
+    # Compute final fit from the intial stage and refinement stage       
+    refine_fit = np.dot(B_new,lasso.coef_) + lasso.intercept_ + sub_fit
+    
+    # Compute fit errors
+    refine_fit_error     = np.linalg.norm(refine_fit-rsf.f)
+    adapt_rel_fit_error = np.linalg.norm(refine_fit-rsf.f)/ \
+                          np.linalg.norm(rsf.f) 
+    timeFit2 = time.time()-start
+    print(timeFit2)
+    
+    # Store results in data structure
+    rsf_refine = RingSpreadFit(rsf.load_step,rsf.img_num,
+                               rsf.a,rsf.b,rsf.xc,rsf.zc,
+                               rsf.f,rsf.theta,
+                               0,0,0,0,0,0,0,0,0)         
+    rsf_refine.coefs = np.append(new_coefs,lasso.coef_)
+    rsf_refine.intercept = lasso.intercept_
+    rsf_refine.fit = refine_fit
+    rsf_refine.l1_ratio = l1_ratio,
+    rsf_refine.means = np.append(B_mean, B_mean_new)
+    rsf_refine.variances = np.append(B_var, B_var_new)
+    rsf_refine.n_iter = lasso.n_iter_
+    rsf_refine.fit_error = refine_fit_error
+    rsf_refine.rel_fit_error = adapt_rel_fit_error
+    
+    total_time = time.time() - absolute_start
+
+    benchmark = [timeB1,timeFit1,timeB2,timeFit2,total_time]    
+    
+    print('rel_fit_error = ' + str(rsf.rel_fit_error))
+    print('rel_fit_error after adapt = ' + str(rsf_refine.rel_fit_error))
+    
+    return rsf_refine, rsf, benchmark
+    
+def generate_gaussian_basis_matrix(path,dtheta,theta0,theta1,n_var):
+    
+    num_theta = (theta1-theta0)/dtheta
+    
+    if not os.path.exists(path):
+        os.mkdir(path)
+        
+    variances = np.linspace((dtheta),(np.pi/8),dtheta)**2
+    
+    B = np.empty([num_theta,0])
+    
+    # Generate first set of basis functions centered at 0
+    for i, var in enumerate(variances):  
+        basis_vec = EM.gaussian_basis_wrap(num_theta,dtheta,0,var)
+        B = np.hstack([B,basis_vec[:,None]])
+    
+    np.save(os.path.join(path,'gauss_basis_shift_0.npy'),B)
+        
+    # Shift first set of basis function to create remaining sets
+    for shift in range(1,num_theta):
+        out_file_path = os.path.join(path,'gaus_basis_shift_' + str(shift) + '.npy')
+        if not os.path.exists(out_file_path):
+            print(shift)
+            B_shift = np.vstack([B[-shift:,:], B[0:-shift,:]])
+            np.save(out_file_path, B_shift)

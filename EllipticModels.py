@@ -318,3 +318,29 @@ def gaussian_basis(num_x,dx,r,mean,variance):
     B = np.exp(-dist_sq/variance)
             
     return B
+    
+def gaussian_basis_wrap(num_theta,dtheta,mean,variance):
+    """
+    inputs:
+            num_theta      number of data points
+            dtheta         distance between data points
+            mean       mean of gaussian function
+            variance   variance of gaussian function
+       
+    outputs:
+            B           basis vector
+    """
+    
+    idx = np.arange(0,num_theta)
+    opposite = (idx[mean-np.floor(num_theta/2)] + idx[mean-np.ceil(num_theta/2)])/2
+    dist1 = np.abs(mean - idx)
+    dist2 = num_theta/2 - np.abs(opposite - idx)
+    dist = np.minimum(dist1,dist2)*dtheta
+
+    # Square the distance
+    dist_sq = dist**2
+    
+    # Build basis vector
+    B = np.exp(-dist_sq/variance)
+            
+    return B
